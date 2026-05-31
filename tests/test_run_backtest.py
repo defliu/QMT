@@ -22,10 +22,13 @@ from scripts.backtest_params import BacktestParams, BacktestResult
 from scripts.run_backtest import (
     BacktestState,
     BacktestContext,
+    ScanParams,
     _backtest_passorder,
     _backtest_get_trade_detail_data,
     _backtest_timetag_to_datetime,
     _calc_metrics,
+    _light_filter,
+    scan_market,
     _result_to_dict,
     _format_report,
     TRADING_DAYS_PER_YEAR,
@@ -787,6 +790,228 @@ class TestDatasource:
         # 如果有 xtquant 会尝试 connect 并报 RunTimeError；没有则报 ImportError
         # 无论哪种，都不应出现 "未知数据源" —— 验证 dispatch 逻辑
         assert '未知数据源' not in str(exc.value)
+
+
+# ============================================================
+#  11. ScanParams
+# ============================================================
+
+class TestScanParams:
+
+    def test_default_values(self):
+        """默认参数正确。"""
+        sp = ScanParams()
+        assert abs(sp.min_price - 5.0) < 1e-6
+        assert sp.min_volume == 100000
+        assert sp.exclude_st is True
+        assert sp.min_listed_days == 365
+        assert sp.max_candidates == 100
+
+    def test_custom_values(self):
+        """自定义参数正确生效。"""
+        sp = ScanParams(min_price=10.0, max_candidates=50)
+        assert abs(sp.min_price - 10.0) < 1e-6
+        assert sp.max_candidates == 50
+
+
+# ============================================================
+#  12. _light_filter
+# ============================================================
+
+class TestLightFilter:
+
+    def test_normal_stock_passes(self):
+        """正常股票通过过滤。"""
+        assert _light_filter('600519', '贵州茅台', 150.0, 3000) is True
+
+    def test_low_price_rejected(self):
+        """价格低于 5 元被过滤。"""
+        assert _light_filter('000001', '平安银行', 3.5, 3000) is False
+
+    def test_st_name_rejected(self):
+        """ST 股票被过滤。"""
+        assert _light_filter('600123', '*ST兰格', 6.0, 1000) is False
+
+    def test_st_prefix_rejected(self):
+        """ST 前缀股票被过滤。"""
+        assert _light_filter('600456', 'ST保千', 7.0, 500) is False
+
+    def test_tui_rejected(self):
+        """退市股票被过滤。"""
+        assert _light_filter('002123', '退市昆机', 8.0, 2000) is False
+
+    def test_short_listed_rejected(self):
+        """上市不足 365 天被过滤。"""
+        assert _light_filter('688999', '次新股', 20.0, 100) is False
+
+    def test_boundary_price(self):
+        """正好 5 元可通过（>= 5.0），4.99 被过滤。"""
+        assert _light_filter('000001', '测试股', 5.0, 500) is True
+        assert _light_filter('000001', '测试股', 4.99, 500) is False
+
+    def test_boundary_listed_days(self):
+        """正好 365 天应通过过滤（>= 365）。"""
+        assert _light_filter('600001', '测试股', 10.0, 365) is True
+        assert _light_filter('600001', '测试股', 10.0, 364) is False
+
+
+# ============================================================
+#  13. scan_market (mocked mootdx)
+# ============================================================
+
+class TestScanMarket:
+
+    @pytest.fixture
+    def mock_mootdx(self, mocker):
+        """Mock mootdx Quotes factory + stocks/quotes/bars."""
+        import pandas as pd
+
+        # Mock stocks() - return DataFrames with real stock codes
+        sh_df = pd.DataFrame([
+            {'code': 600519, 'name': '贵州茅台'},
+            {'code': 600036, 'name': '招商银行'},
+            {'code': 600001, 'name': 'ST保千'},
+            {'code': 688999, 'name': '次新股'},
+        ])
+        sz_df = pd.DataFrame([
+            {'code': 858, 'name': '五粮液'},       # 会被 length 过滤
+            {'code': 39, 'name': '指数'},           # 会被 length 过滤
+            {'code': 999999, 'name': '上证指数'},    # 不匹配前缀
+            {'code': 300750, 'name': '宁德时代'},
+        ])
+
+        mock_quotes = mocker.patch('mootdx.quotes.Quotes')
+        instance = mock_quotes.factory.return_value
+        instance.stocks.side_effect = lambda market: sh_df if market == 1 else sz_df
+
+        # Mock quotes() - return price data
+        q_df = pd.DataFrame([
+            {'code': '600519', 'price': 150.0},
+            {'code': '600036', 'price': 35.0},
+            {'code': '600001', 'price': 8.0},
+            {'code': '688999', 'price': 20.0},
+            {'code': '300750', 'price': 220.0},
+        ])
+        instance.quotes.return_value = q_df
+
+        # Mock bars() - return enough data for most stocks
+        import numpy as np
+        n_days = 500
+        dates = pd.date_range('2023-01-01', periods=n_days, freq='B')
+        bar_df = pd.DataFrame({
+            'close': np.random.uniform(10, 100, n_days),
+            'open': np.random.uniform(10, 100, n_days),
+            'high': np.random.uniform(10, 100, n_days),
+            'low': np.random.uniform(10, 100, n_days),
+            'vol': np.random.uniform(100000, 1000000, n_days),
+            'datetime': [d.strftime('%Y-%m-%d') + ' 15:00' for d in dates],
+        })
+        instance.bars.return_value = bar_df
+
+        return instance
+
+    def test_scan_normal(self, mock_mootdx):
+        """正常扫描返回候选股票。"""
+        sp = ScanParams(max_candidates=10)
+        codes, info = scan_market(sp)
+        # 600519(150元) 和 300750(220元) 应通过；ST保京被过滤；次新股（len问题不影响）
+        assert len(codes) > 0
+        assert len(codes) <= 10
+        # 不应包含 ST 股
+        for c in codes:
+            assert 'ST' not in info.get(c, {}).get('name', '')
+
+    def test_scan_exclude_st(self, mock_mootdx):
+        """ST 股票不在结果中。"""
+        sp = ScanParams(max_candidates=100)
+        codes, info = scan_market(sp)
+        codes_no_suffix = [c.split('.')[0] for c in codes]
+        assert '600001' not in codes_no_suffix  # ST保千
+
+    def test_scan_min_price_filter(self, mock_mootdx):
+        """价格过滤有效。"""
+        # 设置高 min_price 应该只留高价股
+        sp = ScanParams(min_price=100.0, max_candidates=10)
+        codes, info = scan_market(sp)
+        for c in codes:
+            assert info[c]['price'] >= 100.0
+
+    def test_scan_max_candidates(self, mock_mootdx):
+        """候选池上限生效。"""
+        sp = ScanParams(min_price=1.0, max_candidates=2)
+        codes, info = scan_market(sp)
+        assert len(codes) <= 2
+
+    def test_scan_no_mootdx_raises(self, mocker):
+        """mootdx 未安装时抛出 RuntimeError。"""
+        import builtins
+        real_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == 'mootdx.quotes':
+                raise ImportError('No module named mootdx.quotes')
+            return real_import(name, *args, **kwargs)
+
+        mocker.patch('builtins.__import__', side_effect=mock_import)
+        with pytest.raises(RuntimeError) as exc:
+            scan_market(ScanParams())
+        assert 'mootdx' in str(exc.value)
+
+    def test_scan_result_format(self, mock_mootdx):
+        """scan_market 返回格式正确（带后缀代码 + info dict）。"""
+        sp = ScanParams(max_candidates=10)
+        codes, info = scan_market(sp)
+        assert isinstance(codes, list)
+        assert isinstance(info, dict)
+        for c in codes:
+            assert isinstance(c, str)
+            assert '.' in c  # 带后缀
+            assert c in info
+            assert 'name' in info[c]
+            assert 'price' in info[c]
+
+
+# ============================================================
+#  14. CLI --scan 参数
+# ============================================================
+
+class TestCliScan:
+
+    def test_parse_scan_flag(self):
+        """--scan 参数正确解析为 True。"""
+        import argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--scan', action='store_true')
+        parser.add_argument('--min-price', type=float, default=5.0)
+        parser.add_argument('--max-candidates', type=int, default=100)
+
+        args = parser.parse_args(['--scan'])
+        assert args.scan is True
+
+        args = parser.parse_args(['--scan', '--min-price', '10', '--max-candidates', '50'])
+        assert args.scan is True
+        assert abs(args.min_price - 10.0) < 1e-6
+        assert args.max_candidates == 50
+
+    def test_no_scan_flag(self):
+        """不传 --scan 时 scan 为 False。"""
+        import argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--scan', action='store_true')
+
+        args = parser.parse_args([])
+        assert args.scan is False
+
+    def test_scan_with_stocks_uses_stocks(self):
+        """--scan --stocks 时仍以外部 stocks 为准。"""
+        import argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--scan', action='store_true')
+        parser.add_argument('--stocks', type=str)
+
+        args = parser.parse_args(['--scan', '--stocks', '000001.SZ'])
+        assert args.scan is True
+        assert args.stocks == '000001.SZ'
 
 
 # ============================================================

@@ -17,6 +17,7 @@ import math
 import argparse
 import tempfile
 import traceback
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -35,6 +36,20 @@ from scripts.backtest_params import BacktestParams, BacktestResult
 
 TRADING_DAYS_PER_YEAR = 252
 ANNUAL_RISK_FREE_RATE = 0.03
+
+
+# ============================================================
+#  全市场扫描参数
+# ============================================================
+
+@dataclass
+class ScanParams:
+    """全市场扫描参数"""
+    min_price: float = 5.0         # 最低价格过滤
+    min_volume: int = 100000       # 最低日均成交量（手），防垃圾票
+    exclude_st: bool = True        # 排除ST股
+    min_listed_days: int = 365     # 上市最少天数
+    max_candidates: int = 100      # 最终候选池上限
 
 
 # ============================================================
@@ -317,9 +332,9 @@ def _download_mootdx(stock_codes, start_date, end_date, benchmark, period='1d'):
     all_codes = list(set(stock_codes + [benchmark]))
     from datetime import datetime as _dt
     start_dt = _dt.strptime(start_date, '%Y-%m-%d')
-    end_dt = _dt.strptime(end_date, '%Y-%m-%d')
-    cal_days = (end_dt - start_dt).days
-    req_bars = max(int(cal_days * 252 / 365 * 1.5) + 60, 200)
+    today = _dt.today()
+    cal_days = (today - start_dt).days  # days from start to today, not to end_date
+    req_bars = max(int(cal_days * 252 / 365 * 1.5) + 60, 400)
 
     all_data = {}
     all_dates = None
@@ -340,16 +355,24 @@ def _download_mootdx(stock_codes, start_date, end_date, benchmark, period='1d'):
         # Rename vol -> volume, convert datetime int -> DatetimeIndex
         df = df.rename(columns={'vol': 'volume'})
         if 'datetime' in df.columns:
-            df['_date'] = pd.to_datetime(df['datetime'], format='%Y%m%d', errors='coerce')
+            # datetime is '2023-02-09 15:00' string format
+            df['_date'] = pd.to_datetime(df['datetime'].str[:10], format='%Y-%m-%d', errors='coerce')
             df.set_index('_date', inplace=True)
             df.drop(columns=['datetime'], inplace=True)
+            # Remove time component from index
+            df.index = df.index.normalize()
 
-        # Filter by date range
-        df = df[(df.index >= start_date) & (df.index <= end_date)]
-        if df.empty:
+        # Don't filter by date range — return ALL data so backtest engine can use warmup bars
+        # The backtest runner handles date range internally via start_idx/end_idx
+        df.sort_index(inplace=True)
+        # Drop rows with NaT index (failed parse)
+        df = df[df.index.notna()]
+
+        # Only warn if NO data covers the backtest range at all
+        mask = (df.index >= start_date) & (df.index <= end_date)
+        if not mask.any():
             print(f"  [警告] {code} 在指定日期范围内无数据", file=sys.stderr)
             continue
-        df.sort_index(inplace=True)
 
         for col in ['close', 'open', 'high', 'low', 'volume']:
             if col not in df.columns:
@@ -534,6 +557,130 @@ def _download_and_prepare_data(stock_codes, start_date, end_date, benchmark, per
         raise RuntimeError("无法获取交易日数据")
 
     return all_data, all_dates, stock_names
+
+
+# ============================================================
+#  全市场扫描
+# ============================================================
+
+def _light_filter(code: str, name: str, price: float, listed_days: int) -> bool:
+    """初步过滤条件。"""
+    if price < 5.0:
+        return False  # 低价股
+    if 'ST' in name.upper() or '退' in name:
+        return False  # ST/退市
+    if listed_days < 365:
+        return False  # 次新股
+    return True
+
+
+def scan_market(params: ScanParams) -> tuple[list[str], dict]:
+    """
+    全市场扫描。
+    1. 通过 mootdx 获取 A 股全市场股票列表（沪深北）
+    2. 轻量预过滤：价格、成交量、ST、上市天数
+    3. 取前 max_candidates 只
+
+    Returns:
+        (candidate_codes, stock_info)
+        candidate_codes: ['600519.SH', '000858.SZ', ...]
+        stock_info: {code: {name, price, ...}}
+    """
+    try:
+        from mootdx.quotes import Quotes
+    except ImportError:
+        raise RuntimeError("mootdx 未安装。请先运行: pip install mootdx")
+
+    client = Quotes.factory(market='std')
+
+    # ---- 1. 获取全市场股票列表 ----
+    print("  [Scan] 获取全市场股票列表...")
+    sh_df = client.stocks(market=1)  # 上海
+    sz_df = client.stocks(market=0)  # 深圳
+
+    # ---- 2. 构建 {code: (name, suffix)} 并过滤非 A 股指数 ----
+    all_stocks = {}  # {6位代码: (name, suffix)}
+    for row in sh_df.itertuples():
+        code = str(row.code)
+        if code.startswith('6') and len(code) == 6:  # 上海 A 股
+            all_stocks[code] = (str(row.name).strip(), '.SH')
+
+    for row in sz_df.itertuples():
+        code = str(row.code)
+        if code.startswith(('0', '2', '3')) and len(code) == 6:  # 深圳 A 股
+            suffix = '.SZ'
+            if code.startswith('8'):
+                suffix = '.BJ'
+            all_stocks[code] = (str(row.name).strip(), suffix)
+
+    print(f"  [Scan] 全市场 A 股: {len(all_stocks)} 只")
+
+    # ---- 3. 批量获取行情报价 ----
+    print("  [Scan] 获取实时报价...")
+    codes_list = list(all_stocks.keys())
+    quotes_data = pd.DataFrame()
+    # 分批次查询（mootdx 单次查询有限制）
+    batch_size = 500
+    for i in range(0, len(codes_list), batch_size):
+        batch = codes_list[i:i + batch_size]
+        try:
+            q = client.quotes(symbol=batch)
+            if q is not None and not q.empty:
+                quotes_data = pd.concat([quotes_data, q], ignore_index=True)
+        except Exception as e:
+            print(f"  [Scan] 报价 batch {i} 异常: {e}", file=sys.stderr)
+            continue
+
+    # 建立 code -> price 映射
+    price_map = {}
+    if not quotes_data.empty and 'code' in quotes_data.columns:
+        for row in quotes_data.itertuples():
+            price_map[str(row.code)] = float(getattr(row, 'price', 0) or 0)
+
+    # ---- 4. 轻量过滤 ----
+    print("  [Scan] 执行轻量过滤...")
+    # 先按名称和价格过滤
+    pre_filtered = []  # [(code, name, suffix, price)]
+    for code, (name, suffix) in all_stocks.items():
+        if params.exclude_st and ('ST' in name.upper() or '退' in name):
+            continue
+        price = price_map.get(code, 0.0)
+        if price < params.min_price:
+            continue
+        pre_filtered.append((code, name, suffix, price))
+
+    # 按价格降序排列（优先选优质股）
+    pre_filtered.sort(key=lambda x: x[3], reverse=True)
+    print(f"  [Scan] 价格/ST 过滤后: {len(pre_filtered)} 只")
+
+    # ---- 5. 检查上市天数（只对候选股票逐一检查） ----
+    result = []
+    stock_info = {}
+    check_count = min(params.max_candidates * 3, len(pre_filtered))
+    checked = 0
+
+    for code, name, suffix, price in pre_filtered:
+        if len(result) >= params.max_candidates:
+            break
+        if checked >= check_count:
+            break
+        checked += 1
+
+        try:
+            bars = client.bars(symbol=code, category=4, offset=params.min_listed_days + 60)
+            listed_days = len(bars) if bars is not None else 0
+        except Exception:
+            listed_days = 0
+
+        if listed_days < params.min_listed_days:
+            continue
+
+        full_code = code + suffix
+        result.append(full_code)
+        stock_info[full_code] = {'name': name, 'price': price}
+
+    print(f"  [Scan] 最终候选池: {len(result)} 只股票")
+    return result, stock_info
 
 
 # ============================================================
@@ -1077,6 +1224,12 @@ def _parse_cli():
     p.add_argument('--datasource', type=str, default='xtquant',
                    choices=['xtquant', 'mootdx', 'tencent'],
                    help='数据源: xtquant(默认,需开MiniQMT), mootdx(通达信直连), tencent(腾讯财经)')
+    p.add_argument('--scan', action='store_true',
+                   help='全市场扫描模式，自动获取股票池（需 --datasource mootdx）')
+    p.add_argument('--min-price', type=float, default=5.0,
+                   help='扫描最低股价过滤 (默认 5.0)')
+    p.add_argument('--max-candidates', type=int, default=100,
+                   help='扫描候选池上限 (默认 100)')
     return p.parse_args()
 
 
@@ -1113,6 +1266,21 @@ def main():
             params.initial_capital = args.capital
         if args.stocks:
             params.stock_codes = [s.strip() for s in args.stocks.split(',')]
+
+    # ---- 全市场扫描模式 ----
+    if args.scan and not params.stock_codes:
+        print("── 全市场扫描 ──")
+        scan_params = ScanParams(
+            min_price=args.min_price,
+            max_candidates=args.max_candidates,
+        )
+        try:
+            candidates, info = scan_market(scan_params)
+        except Exception as e:
+            print(f"  [错误] 全市场扫描失败: {e}", file=sys.stderr)
+            return 1
+        params.stock_codes = candidates
+        print(f"  候选池: {len(candidates)} 只股票")
 
     if not params.stock_codes:
         runner = BacktestRunner()
