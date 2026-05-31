@@ -299,9 +299,15 @@ class BacktestContext:
 
     @property
     def close(self):
-        df = self._all_data.get(list(self._all_data.keys())[0]) if self._all_data else None
-        if df is not None and self._current_bar < len(df):
-            return float(df['close'].iloc[self._current_bar])
+        if not self._all_data:
+            return 10.0
+        try:
+            first_key = list(self._all_data.keys())[0]
+            df = self._all_data[first_key]
+            if df is not None and 'close' in df.columns and self._current_bar < len(df):
+                return float(df['close'].iloc[self._current_bar])
+        except (IndexError, KeyError, ValueError, TypeError):
+            pass
         return 10.0
 
 
@@ -352,8 +358,11 @@ def _download_mootdx(stock_codes, start_date, end_date, benchmark, period='1d'):
             print(f"  [警告] {code} 无数据", file=sys.stderr)
             continue
 
-        # Rename vol -> volume, convert datetime int -> DatetimeIndex
-        df = df.rename(columns={'vol': 'volume'})
+        # Rename vol -> volume, remove duplicate volume column
+        if 'vol' in df.columns and 'volume' in df.columns and 'volume' in df.columns:
+            df = df.drop(columns=['vol'])
+        elif 'vol' in df.columns:
+            df = df.rename(columns={'vol': 'volume'})
         if 'datetime' in df.columns:
             # datetime is '2023-02-09 15:00' string format
             df['_date'] = pd.to_datetime(df['datetime'].str[:10], format='%Y-%m-%d', errors='coerce')
@@ -607,7 +616,7 @@ def scan_market(params: ScanParams) -> tuple[list[str], dict]:
 
     for row in sz_df.itertuples():
         code = str(row.code)
-        if code.startswith(('0', '2', '3')) and len(code) == 6:  # 深圳 A 股
+        if code.startswith(('0', '2', '3')) and len(code) == 6 and not code.startswith('399'):  # 深圳 A 股，排除指数(399xxx)
             suffix = '.SZ'
             if code.startswith('8'):
                 suffix = '.BJ'
@@ -874,8 +883,9 @@ class BacktestRunner:
     3. 提取结果并输出结构化报告
     """
 
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: str = None, strategy: str = 'default'):
         self.config_path = config_path
+        self.strategy = strategy
         self._cfg = {}
         self._load_config()
 
@@ -965,7 +975,7 @@ class BacktestRunner:
 
         # ---- 3. Patch qmt_wrapper ----
         print("\n── 设置回测环境 ──")
-        self._patch_qmt_wrapper(params, valid_codes)
+        self._patch_qmt_wrapper(params, valid_codes, strategy=self.strategy)
 
         import adapters.qmt_wrapper as qmt
 
@@ -1045,14 +1055,21 @@ class BacktestRunner:
         _backtest_state = None
         return result
 
-    def _patch_qmt_wrapper(self, params, valid_codes):
+    def _patch_qmt_wrapper(self, params, valid_codes, strategy='default'):
         """Monkey-patch qmt_wrapper 模块使之运行在回测模式。"""
         # 确保 project root 在 path
         if PROJECT_ROOT not in sys.path:
             sys.path.insert(0, PROJECT_ROOT)
 
         import adapters.qmt_wrapper as qmt
-        import core.signal_main_rise as sig
+
+        # 策略选择: 当 strategy == 'qmt37' 时替换信号函数
+        if strategy == 'qmt37':
+            from qmt37_strategy.backtest_adapter import check_buy as qmt37_check_buy
+            qmt.check_buy = qmt37_check_buy
+            print("  [策略] 使用千问3.7版信号")
+        else:
+            import core.signal_main_rise as sig
 
         # 打补丁
         qmt.passorder = _backtest_passorder
@@ -1069,11 +1086,15 @@ class BacktestRunner:
             if hasattr(qmt, attr):
                 setattr(qmt, attr, os.path.join(tmpdir, attr.lower() + '.txt'))
 
-        # 写 pool 文件
+        # 写 pool 文件（6位纯代码，_parse_pool_line 的 _code6_to_std 格式）
         pool_file = os.path.join(tmpdir, 'pool.txt')
+        seen_6 = set()
         with open(pool_file, 'w', encoding='gbk') as f:
             for code in valid_codes:
-                f.write(f"{code}\n")
+                code6 = code.split('.')[0].strip()
+                if code6 and code6 not in seen_6:
+                    seen_6.add(code6)
+                    f.write(f"{code6}\t回测\n")
         qmt.POOL_PATH = pool_file
         qmt.POOL_FILE = pool_file
 
@@ -1131,7 +1152,7 @@ class BacktestRunner:
         )
         state = _backtest_state
 
-        self._patch_qmt_wrapper(params, params.stock_codes)
+        self._patch_qmt_wrapper(params, params.stock_codes, strategy=self.strategy)
         import adapters.qmt_wrapper as qmt
 
         start_idx = 0
@@ -1212,6 +1233,7 @@ def _parse_cli():
   python scripts/run_backtest.py --params custom_params.yaml
   python scripts/run_backtest.py --datasource mootdx --start 2024-01-01 --end 2024-01-10 --stocks "600519.SH,000001.SZ" --capital 100000 --json
   python scripts/run_backtest.py --datasource tencent --start 2024-01-01 --end 2024-01-10 --stocks "600519.SH,000001.SZ" --capital 100000 --json
+  python scripts/run_backtest.py --datasource mootdx --scan --strategy qmt37
         """,
     )
     p.add_argument('--start', type=str, help='开始日期 YYYY-MM-DD')
@@ -1230,6 +1252,9 @@ def _parse_cli():
                    help='扫描最低股价过滤 (默认 5.0)')
     p.add_argument('--max-candidates', type=int, default=100,
                    help='扫描候选池上限 (默认 100)')
+    p.add_argument('--strategy', type=str, default='default',
+                   choices=['default', 'qmt37'],
+                   help='策略选择: default(现有策略), qmt37(千问3.7版)')
     return p.parse_args()
 
 
@@ -1287,7 +1312,7 @@ def main():
         params.stock_codes = runner._default_stocks()
 
     # 执行
-    runner = BacktestRunner()
+    runner = BacktestRunner(strategy=args.strategy)
     result = runner.run_with_params(params, datasource=args.datasource)
 
     # 输出
