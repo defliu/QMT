@@ -780,15 +780,17 @@ class TestDatasource:
         assert '未知数据源' in str(exc.value)
         assert 'invalid' in str(exc.value)
 
-    def test_default_datasource_is_xtquant(self):
-        """默认 datasource=xtquant 时 xtquant 报错应为 ImportError 而非 invalid。"""
+    def test_default_datasource_is_xtquant(self, mocker):
+        """默认 datasource=xtquant 时 xtquant 报错应为 RuntimeError/ImportError 而非 invalid。"""
         import scripts.run_backtest as bt
+        # Mock xtdata.connect to raise an exception, testing dispatch logic
+        # without relying on xtquant's data download (which requires MiniQMT cache)
+        mocker.patch('xtquant.xtdata.connect', side_effect=RuntimeError("Mock: no MiniQMT"))
         with pytest.raises((RuntimeError, ImportError)) as exc:
             bt._download_and_prepare_data(
                 ['000001.SZ'], '2024-01-01', '2024-01-10', '000300.SH',
             )
-        # 如果有 xtquant 会尝试 connect 并报 RunTimeError；没有则报 ImportError
-        # 无论哪种，都不应出现 "未知数据源" —— 验证 dispatch 逻辑
+        # 验证 dispatch 逻辑：走 xtquant 路径，而非 "未知数据源"
         assert '未知数据源' not in str(exc.value)
 
 
@@ -894,16 +896,48 @@ class TestScanMarket:
         ])
         instance.quotes.return_value = q_df
 
-        # Mock bars() - return enough data for most stocks
+        # Mock bars() - construct data that passes _tdx_formula_filter
+        # 7 条件要求:
+        #   1) 60日振幅≤25%  → 价格范围窄
+        #   2) 3日内突破密集顶 → 最后一天突破
+        #   3) 蓄势5日≥2天<3%
+        #   4) MA5>MA10>MA20>MA60 多头排列
+        #   5) MA5角度≥30°
+        #   6) 收阳线
+        #   7) 非急拉坑底
         import numpy as np
         n_days = 500
         dates = pd.date_range('2023-01-01', periods=n_days, freq='B')
+
+        # 构造上升趋势 — 需要让 MA5 角度 ≥ 30°
+        # 公式: angle = deg(arctan((MA5/MA5_prev - 1) * 100)) ≥ 30
+        # 即 (MA5/MA5_prev - 1) * 100 ≥ tan(30°) ≈ 0.577
+        # MA5 是 5 日均价，MA5/MA5_prev ≈ C[-1]/C[-6]^(1/5)
+        # 所以最后 5 天需约 0.6% 涨幅/天
+        rng = np.random.default_rng(42)
+
+        # 前期平缓 (60 日振幅 ≤ 25%)
+        pre_close = np.linspace(10, 11, n_days - 10)
+        # 最后 10 天快速拉升保障 MA5 角度
+        steep_rise = np.linspace(11, 13, 10)
+        close_prices = np.concatenate([pre_close, steep_rise])
+        # 确保最后一天阳线 + 突破 60 日高点
+        hhv_60_ref = np.max(close_prices[-61:-1])
+        close_prices[-1] = max(close_prices[-1], hhv_60_ref * 1.015)
+        close_prices[-2] = min(close_prices[-2], hhv_60_ref * 0.99)
+
+        opens = close_prices - rng.uniform(0.05, 0.1, n_days)
+        opens[-1] = close_prices[-1] * 0.995  # 收阳
+
+        high = np.maximum(close_prices, opens) + rng.uniform(0.02, 0.05, n_days)
+        low = np.minimum(close_prices, opens) - rng.uniform(0.02, 0.05, n_days)
+
         bar_df = pd.DataFrame({
-            'close': np.random.uniform(10, 100, n_days),
-            'open': np.random.uniform(10, 100, n_days),
-            'high': np.random.uniform(10, 100, n_days),
-            'low': np.random.uniform(10, 100, n_days),
-            'vol': np.random.uniform(100000, 1000000, n_days),
+            'close': close_prices,
+            'open': opens,
+            'high': high,
+            'low': low,
+            'vol': rng.uniform(200000, 800000, n_days),
             'datetime': [d.strftime('%Y-%m-%d') + ' 15:00' for d in dates],
         })
         instance.bars.return_value = bar_df

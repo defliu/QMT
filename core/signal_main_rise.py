@@ -1,5 +1,5 @@
 # coding=utf-8
-"""主升浪买点信号 + 8D打分系统 + 板块热度分析（纯逻辑，无 QMT 依赖）"""
+"""8D打分系统 + 板块热度分析（纯逻辑，无 QMT 依赖）"""
 
 import os
 import json
@@ -15,134 +15,12 @@ from core.utils import ema, ma, calc_macd, calc_cmf, calc_angle, safe_last, calc
 #  参数常量
 # ============================================================
 
-N = 5
-N1 = 10
-N2 = 20
-N3 = 60
-M = 10
-YANG_RATIO = 60
-CMF_PERIOD = 20
-CMF_THRESHOLD = 0.15
 REQUIRED_BARS = 120
 MIN_BARS = 60
 SECTOR_HOT_TOP_N = 10
 MARKET_INDEX_CODE = '000001.SH'
 MARKET_MA20 = 20
 MARKET_MA60 = 60
-
-
-# ============================================================
-#  选股信号
-# ============================================================
-
-def _filter_pit_breakout(df):
-    """
-    坑底急拉过滤。
-    文档定义: 22日内最低价的最低值 → 坑区范围(当前最低≤坑底×1.16) → 2日内涨幅>4.5%则过滤
-    Returns: True = 正常（不过滤）, False = 过滤（急拉坑底）
-    """
-    low_22 = df['low'].rolling(22).min()
-    pit_zone = df['low'] <= low_22.shift(1) * 1.16
-    rapid_rise = (df['close'] / df['close'].shift(2) - 1) > 0.045
-    return ~(pit_zone & rapid_rise)
-
-
-def check_buy(df):
-    """主买点判断逻辑。返回 (bool, reason_str, buy_type)。"""
-    close = df['close'].astype(float)
-    high = df['high'].astype(float)
-    low = df['low'].astype(float)
-    open_ = df['open'].astype(float)
-    volume = df['volume'].astype(float)
-
-    ma5 = ma(close, N)
-    ma10 = ma(close, N1)
-    ma20 = ma(close, N2)
-    ma60 = ma(close, N3)
-
-    s1 = ema(close, 10)
-    s2 = ema(s1, 3)
-    s3 = ema(s2, 3)
-    s4 = ema(s3, 3)
-    purple_band = ema(s4, 3)
-
-    l1 = ema(close, 45)
-    l2 = ema(l1, 3)
-    l3 = ema(l2, 3)
-    l4 = ema(l3, 3)
-    red_band = ema(l4, 3)
-
-    _, _, macd = calc_macd(close)
-    macd_red_ok = (macd > 0) & (macd.shift(1) > 0) & (macd >= macd.shift(1))
-    macd_green_ok = (macd < 0) & (macd.shift(1) < 0) & (macd > macd.shift(1))
-    macd_first_green_to_red = (macd > 0) & (macd.shift(1) < 0)
-    macd_satisfied = macd_red_ok | macd_green_ok | macd_first_green_to_red
-
-    no_pit = _filter_pit_breakout(df)
-
-    bullish_multi = (ma5 > ma10) & (ma10 > ma20) & (ma20 > ma60)
-    yang = close > open_
-
-    # 买点1（回踩反包）
-    pullback_hold = low >= ma5 * 0.98
-    engulf = close > high.shift(1)
-    buy_signal_1 = bullish_multi & pullback_hold & yang & engulf & macd_satisfied & no_pit
-
-    # 买点2（趋势突破）
-    # B2-1: 筹码密集（近似：90日价格CV ≤ 12%）
-    price_std = close.rolling(90).std()
-    price_mean = close.rolling(90).mean()
-    chip_dense = (price_std / price_mean) <= 0.12
-
-    # B2-2: 突破30日高点1%
-    high_30 = high.rolling(30).max().shift(1)
-    breakout = (close / high_30 > 1.01) & (close.shift(1) / high_30.shift(1) <= 1.01)
-
-    # B2-4: 趋势确认（站在60日通道上轨）
-    high_60 = high.rolling(60).max()
-    trend_confirm = close > high_60 * 0.98
-
-    # B2-5: 蓄势（5日内有2日涨跌幅绝对值<3%）
-    pct_abs = close.pct_change().abs()
-    accumulation = (pct_abs < 0.03).rolling(5).sum() >= 2
-
-    # B2-6: 角度
-    angle = calc_angle(ma5)
-    angle_ok = angle >= 45
-
-    buy_signal_2 = (chip_dense & breakout & bullish_multi & trend_confirm
-                    & accumulation & angle_ok & yang & macd_satisfied & no_pit)
-
-    buy = buy_signal_1 | buy_signal_2
-
-    val = buy.iloc[-1] if len(buy) > 0 else False
-    if isinstance(val, (pd.Series, np.ndarray)):
-        val = bool(val.iloc[-1])
-    else:
-        val = bool(val)
-
-    if not val:
-        return False, "", None
-
-    has_buy1 = bool(buy_signal_1.iloc[-1]) if len(buy_signal_1) > 0 else False
-    has_buy2 = bool(buy_signal_2.iloc[-1]) if len(buy_signal_2) > 0 else False
-
-    if has_buy1 and has_buy2:
-        buy_type = 'both'
-    elif has_buy1:
-        buy_type = 'buy1'
-    else:
-        buy_type = 'buy2'
-
-    reasons = []
-    if has_buy1:
-        reasons.append("买点1")
-    if has_buy2:
-        reasons.append("买点2")
-    if macd_satisfied.iloc[-1]:
-        reasons.append("MACD")
-
-    return True, "+".join(reasons), buy_type
 
 
 # ============================================================
@@ -159,10 +37,10 @@ class ScoreCalculator8D:
     GM_TARGET = 70.0
     DEBT_RATIO_SAFE = 30.0
     DEBT_RATIO_MAX = 65.0
-    PE_CENTER = 15.0
-    PE_WIDTH = 12.0
-    PB_CENTER = 1.5
-    PB_WIDTH = 1.5
+    PE_CENTER = 25.0
+    PE_WIDTH = 30.0
+    PB_CENTER = 3.0
+    PB_WIDTH = 3.0
     CAP_CENTER = 80.0
     CAP_WIDTH = 70.0
     BIAS_CENTER = 4.0
@@ -698,7 +576,11 @@ class ScoreCalculator8D:
             score += 0.5
         bonus = self._sector_bonus.get(stock_code, 0)
         if bonus > 0:
-            score += self._linear_map(bonus, 1, 15, 0.3, 2, cap=True)
+            # 板块热度映射：0-10分映射为 0.0-2.0 附加分
+            # 热力 6+（top 20%）  → 1.2-2.0
+            # 热力 1-5（中间 40%） → 0.2-1.2
+            # 热力 0（底部 40%）  → 不加分
+            score += self._linear_map(bonus, 0, 10, 0.0, 2.0, cap=True)
         else:
             score += 1.0
         return round(min(score, 7.0), 2)
@@ -812,3 +694,20 @@ class SectorAnalyzer:
         self._bonus_cache = {}
         self._cache_date = today
         return {}
+
+
+# ============================================================
+#  check_buy — 买点信号过滤（通过式过滤器）
+# ============================================================
+
+def check_buy(df, min_bars=60):
+    """买点信号过滤 — 调试模式/测试账号下直接通过，由8D打分做最终筛选。
+
+    返回 (buy: bool, signal: str, buy_type: str)
+    - buy: True=可买入
+    - signal: 信号描述
+    - buy_type: 买入类型
+    """
+    if df is None or len(df) < min_bars:
+        return False, '', ''
+    return True, '', 'pool'

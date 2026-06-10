@@ -149,7 +149,7 @@ def _backtest_passorder(order_type, price_type, account_id, stock_code,
             existing['volume'] = total_vol
             existing['cost'] = total_cost / total_vol
         else:
-            state.positions[stock_code] = {'volume': volume, 'cost': price}
+            state.positions[stock_code] = {'volume': volume, 'cost': price, 'entry_date': state.current_date}
 
     else:
         pos = state.positions.get(stock_code)
@@ -164,14 +164,6 @@ def _backtest_passorder(order_type, price_type, account_id, stock_code,
 
         realized_pnl = (price - pos['cost']) * volume
 
-        trade_code = stock_code
-        # 查找是否已有同代码未平仓
-        existing_trade = None
-        for t in state.closed_trades:
-            if t.get('code') == trade_code and t.get('pnl') == 0:
-                existing_trade = t
-                break
-
         state.closed_trades.append({
             'code': stock_code,
             'volume': volume,
@@ -179,6 +171,7 @@ def _backtest_passorder(order_type, price_type, account_id, stock_code,
             'exit_price': price,
             'pnl': realized_pnl,
             'exit_date': state.current_date,
+            'entry_date': pos.get('entry_date', state.current_date),
         })
 
         pos['volume'] -= volume
@@ -237,6 +230,18 @@ class BacktestContext:
         self._stock_names = stock_names or {}
         self._time_str = '1450'  # 尾盘窗口
 
+    def _get_df_close(self, code):
+        """安全获取某只股票当前 bar 的收盘价，返回 float 或 None。"""
+        df = self._all_data.get(code)
+        if df is None or df.empty or 'close' not in df.columns:
+            return None
+        if self._current_bar < 0 or self._current_bar >= len(df):
+            return None
+        try:
+            return float(df['close'].iloc[self._current_bar])
+        except (IndexError, ValueError, TypeError):
+            return None
+
     def get_market_data_ex(self, field_list=None, stock_list=None,
                            stock_code=None, period='1d', count=-1, **kwargs):
         """返回截至 current_bar 的行情数据。"""
@@ -271,10 +276,16 @@ class BacktestContext:
         result = {}
         for code in (codes or []):
             df = self._all_data.get(code)
-            if df is not None and self._current_bar < len(df):
+            if df is None or df.empty or 'close' not in df.columns:
+                continue
+            if self._current_bar < 0 or self._current_bar >= len(df):
+                continue
+            try:
                 close = float(df['close'].iloc[self._current_bar])
                 pre_close = float(df['close'].iloc[max(0, self._current_bar - 1)])
                 result[code] = {'lastPrice': close, 'preClose': pre_close}
+            except (IndexError, ValueError, TypeError):
+                continue
         return result
 
     def get_stock_name(self, code):
@@ -282,10 +293,14 @@ class BacktestContext:
 
     def get_instrument_detail(self, code):
         df = self._all_data.get(code)
-        if df is not None and self._current_bar < len(df):
-            close = float(df['close'].iloc[self._current_bar])
-            volume = float(df['volume'].iloc[self._current_bar])
-            return {'CirculateValue': close * volume * 10}
+        if df is not None and not df.empty and 'close' in df.columns and 'volume' in df.columns:
+            if 0 <= self._current_bar < len(df):
+                try:
+                    close = float(df['close'].iloc[self._current_bar])
+                    volume = float(df['volume'].iloc[self._current_bar])
+                    return {'CirculateValue': close * volume * 10}
+                except (IndexError, ValueError, TypeError):
+                    pass
         return {'CirculateValue': 1_000_000_000}
 
     def get_sector_list(self):
@@ -299,16 +314,15 @@ class BacktestContext:
 
     @property
     def close(self):
+        """取第一只股票当前 bar 收盘价作为大盘参考。"""
         if not self._all_data:
             return 10.0
         try:
             first_key = list(self._all_data.keys())[0]
-            df = self._all_data[first_key]
-            if df is not None and 'close' in df.columns and self._current_bar < len(df):
-                return float(df['close'].iloc[self._current_bar])
-        except (IndexError, KeyError, ValueError, TypeError):
-            pass
-        return 10.0
+            val = self._get_df_close(first_key)
+            return val if val is not None else 10.0
+        except Exception:
+            return 10.0
 
 
 # ============================================================
@@ -346,6 +360,25 @@ def _download_mootdx(stock_codes, start_date, end_date, benchmark, period='1d'):
     all_dates = None
     stock_names = {}
 
+    # ---- 批量获取股票名称（通过 mootdx quotes） ----
+    try:
+        # 分批次查询名称（mootdx 单次查询有限制）
+        batch_size = 200
+        for i in range(0, len(all_codes), batch_size):
+            batch = [c for c in all_codes[i:i + batch_size]]
+            symbol_batch = [_strip_suffix(c) for c in batch]
+            q = client.quotes(symbol=symbol_batch)
+            if q is not None and not q.empty:
+                for _, row in q.iterrows():
+                    if 'code' in q.columns and 'name' in q.columns:
+                        code_str = str(row['code'])
+                        name_str = str(row['name']).strip()
+                        full_code = next((c for c in batch if _strip_suffix(c) == code_str), None)
+                        if full_code and name_str:
+                            stock_names[full_code] = name_str
+    except Exception:
+        pass  # 名称获取失败不影响主流程
+
     for code in all_codes:
         symbol = _strip_suffix(code)
         try:
@@ -359,7 +392,7 @@ def _download_mootdx(stock_codes, start_date, end_date, benchmark, period='1d'):
             continue
 
         # Rename vol -> volume, remove duplicate volume column
-        if 'vol' in df.columns and 'volume' in df.columns and 'volume' in df.columns:
+        if 'vol' in df.columns and 'volume' in df.columns:
             df = df.drop(columns=['vol'])
         elif 'vol' in df.columns:
             df = df.rename(columns={'vol': 'volume'})
@@ -383,9 +416,46 @@ def _download_mootdx(stock_codes, start_date, end_date, benchmark, period='1d'):
             print(f"  [警告] {code} 在指定日期范围内无数据", file=sys.stderr)
             continue
 
+        # ---- 数据质量校验 ----
+        quality_warnings = []
         for col in ['close', 'open', 'high', 'low', 'volume']:
             if col not in df.columns:
                 print(f"  [警告] {code} 缺少列: {col}", file=sys.stderr)
+                quality_warnings.append(f"缺少{col}")
+
+        # 检查 NaN
+        nan_count = df[['close', 'open', 'high', 'low', 'volume']].isna().sum().sum()
+        if nan_count > 0:
+            quality_warnings.append(f"NaN={nan_count}")
+            df = df.dropna(subset=['close', 'open', 'high', 'low', 'volume'])
+
+        # 检查负价格 / 零价格
+        neg_close = (df['close'] <= 0).sum()
+        if neg_close > 0:
+            quality_warnings.append(f"非正收盘价={neg_close}行")
+            df = df[df['close'] > 0]
+
+        # 检查零成交量 (>10% of rows with zero volume = warning)
+        zero_vol = (df['volume'] <= 0).sum()
+        total_rows = len(df)
+        if zero_vol > 0 and zero_vol / total_rows > 0.1:
+            quality_warnings.append(f"零成交量比例={zero_vol / total_rows:.1%}")
+
+        # 检查 H > L 一致性
+        hl_invalid = (df['high'] < df['low']).sum()
+        if hl_invalid > 0:
+            quality_warnings.append(f"high<low={hl_invalid}行")
+
+        # 检查足够 warmup bars
+        if len(df) < 120:
+            quality_warnings.append(f"仅{len(df)}条K线(<120)")
+
+        if quality_warnings:
+            print(f"  [数据质量] {code}: {'; '.join(quality_warnings)}", file=sys.stderr)
+
+        if df.empty:
+            print(f"  [警告] {code} 质量过滤后无数据", file=sys.stderr)
+            continue
 
         all_data[code] = df
         if all_dates is None:
@@ -453,15 +523,65 @@ def _download_tencent(stock_codes, start_date, end_date, benchmark, period='1d')
             })
 
         df = pd.DataFrame(records, index=pd.to_datetime(index_dates))
-        df = df[(df.index >= start_date) & (df.index <= end_date)]
-        if df.empty:
+        # 不按日期范围过滤 — 返回全量数据，回测引擎通过 start_idx/end_idx 内部处理
+        df.sort_index(inplace=True)
+        # 清除 NaT 索引行
+        df = df[df.index.notna()]
+
+        # 仅当没有任何数据覆盖回测范围时告警
+        mask = (df.index >= start_date) & (df.index <= end_date)
+        if not mask.any():
             print(f"  [警告] {code} 在指定日期范围内无数据", file=sys.stderr)
             continue
-        df.sort_index(inplace=True)
 
+        # ---- 数据质量校验 ----
+        quality_warnings = []
         for col in ['close', 'open', 'high', 'low', 'volume']:
             if col not in df.columns:
                 print(f"  [警告] {code} 缺少列: {col}", file=sys.stderr)
+                quality_warnings.append(f"缺少{col}")
+
+        # 检查 NaN
+        nan_count = df[['close', 'open', 'high', 'low', 'volume']].isna().sum().sum()
+        if nan_count > 0:
+            quality_warnings.append(f"NaN={nan_count}")
+            df = df.dropna(subset=['close', 'open', 'high', 'low', 'volume'])
+
+        # 检查负价格 / 零价格
+        neg_close = (df['close'] <= 0).sum()
+        if neg_close > 0:
+            quality_warnings.append(f"非正收盘价={neg_close}行")
+            df = df[df['close'] > 0]
+
+        # 检查零成交量 (>10% of rows with zero volume = warning)
+        zero_vol = (df['volume'] <= 0).sum()
+        total_rows = len(df)
+        if zero_vol > 0 and zero_vol / total_rows > 0.1:
+            quality_warnings.append(f"零成交量比例={zero_vol / total_rows:.1%}")
+
+        # 检查 H > L 一致性
+        hl_invalid = (df['high'] < df['low']).sum()
+        if hl_invalid > 0:
+            quality_warnings.append(f"high<low={hl_invalid}行")
+
+        # 检查足够 warmup bars
+        if len(df) < 120:
+            quality_warnings.append(f"仅{len(df)}条K线(<120)")
+
+        if quality_warnings:
+            print(f"  [数据质量] {code}: {'; '.join(quality_warnings)}", file=sys.stderr)
+
+        if df.empty:
+            print(f"  [警告] {code} 质量过滤后无数据", file=sys.stderr)
+            continue
+
+        # ---- 获取股票名称（从腾讯 API 响应中提取） ----
+        try:
+            name_raw = stock_data.get('name') or ''
+            if name_raw:
+                stock_names[code] = name_raw.strip()
+        except Exception:
+            pass
 
         all_data[code] = df
         if all_dates is None:
@@ -684,12 +804,117 @@ def scan_market(params: ScanParams) -> tuple[list[str], dict]:
         if listed_days < params.min_listed_days:
             continue
 
+        # ---- 通达信实战放宽版条件筛选 ----
+        if bars is not None and not bars.empty:
+            try:
+                if not _tdx_formula_filter(bars):
+                    continue
+            except Exception as e:
+                # 数据异常跳过
+                continue
+
         full_code = code + suffix
         result.append(full_code)
         stock_info[full_code] = {'name': name, 'price': price}
 
-    print(f"  [Scan] 最终候选池: {len(result)} 只股票")
+    print(f"  [Scan] 最终候选池: {len(result)} 只股票 (通达信实战放宽版)")
     return result, stock_info
+
+
+# ============================================================
+#  通达信实战放宽版选股公式（scan 筛选）
+# ============================================================
+
+def _tdx_formula_filter(df) -> bool:
+    """
+    通达信实战放宽版条件选股 — Python 等价实现。
+    参考: 筹码密集启动突破 - 实战放宽版.txt
+
+    条件：
+    1. 筹码密集: 60日振幅 ≤ 25%（COST替代）
+    2. 突破密集顶: C > 前1日60日高 且 3日内有刚突破
+    3. 蓄势: 5日≥2天涨跌幅<3%
+    4. 多头排列: MA5>MA10>MA20 且 MA60走平/向上
+    5. MA5角度 ≥ 30度
+    6. 收阳线: C > O
+    7. 排除急拉坑底
+
+    Args:
+        df: mootdx bars DataFrame, 至少含 open/high/low/close 列
+
+    Returns:
+        bool: 是否通过全部条件
+    """
+    import numpy as np
+    import pandas as pd
+
+    if df is None or len(df) < 90:
+        return False
+
+    c = df['close'].values.astype(float)
+    h = df['high'].values.astype(float)
+    l = df['low'].values.astype(float)
+    o = df['open'].values.astype(float)
+
+    # ---- 1. 筹码密集（COST替代：60日振幅 ≤ 25%）----
+    hhv_60 = np.max(h[-60:])
+    llv_60 = np.min(l[-60:])
+    集中度 = (hhv_60 - llv_60) / llv_60 * 100
+    if 集中度 > 25:
+        return False
+
+    # ---- 2. 突破密集顶 ----
+    # 密集区高点 = REF(HHV(H,60),1)
+    # 3日内至少1天: C > 密集区高点 AND REF(C,1) <= 密集区高点
+    found_breakout = False
+    for offset in range(1, 4):  # 检查今日、昨日、前日
+        if len(df) <= offset + 60:
+            continue
+        hi_60 = np.max(h[-(60 + offset):-offset]) if offset > 0 else np.max(h[-60:])
+        c_today = c[-offset]
+        c_yesterday = c[-(offset + 1)]
+        if c_today > hi_60 and c_yesterday <= hi_60:
+            found_breakout = True
+            break
+    if not found_breakout:
+        return False
+
+    # ---- 3. 蓄势 ----
+    涨幅 = np.abs(c / np.roll(c, 1) - 1)
+    if np.sum(涨幅[-5:] < 0.03) < 2:
+        return False
+
+    # ---- 4. 多头排列 ----
+    ma5 = np.mean(c[-5:])
+    ma10 = np.mean(c[-10:])
+    ma20 = np.mean(c[-20:])
+    ma60 = np.mean(c[-60:])
+    ma60_prev = np.mean(c[-61:-1])
+    if not (ma5 > ma10 > ma20 and ma60 >= ma60_prev):
+        return False
+
+    # ---- 5. MA5 角度 ≥ 30 度 ----
+    ma5_prev = np.mean(c[-6:-1]) if len(c) >= 6 else ma5
+    if ma5_prev <= 0:
+        return False
+    角度 = np.degrees(np.arctan((ma5 / ma5_prev - 1) * 100))
+    if 角度 < 30:
+        return False
+
+    # ---- 6. 收阳线 ----
+    if not (c[-1] > o[-1]):
+        return False
+
+    # ---- 7. 排除急拉坑底 ----
+    hhv_18 = np.max(h[-18:]) if len(c) >= 18 else np.max(h)
+    llv_18 = np.min(l[-18:]) if len(c) >= 18 else np.min(l)
+    坑幅 = (hhv_18 - llv_18) / hhv_18 * 100
+    有坑 = 坑幅 >= 16
+    急拉脱离 = np.max(c[-3:]) / np.min(l[-3:]) >= 1.13
+    if 有坑 and 急拉脱离:
+        return False
+
+    return True  # 全部条件通过
 
 
 # ============================================================
@@ -775,6 +1000,21 @@ def _calc_metrics(state, params, all_dates, all_data):
                 else:
                     monthly[mk] = mr
 
+    # 平均持仓天数
+    hold_days = []
+    for t in trades:
+        ed = t.get('entry_date')
+        xd = t.get('exit_date')
+        if ed and xd:
+            from datetime import datetime as _bt_dt
+            try:
+                e = _bt_dt.strptime(ed, '%Y%m%d')
+                x = _bt_dt.strptime(xd, '%Y%m%d')
+                hold_days.append((x - e).days)
+            except Exception:
+                pass
+    avg_hold_days = round(sum(hold_days) / len(hold_days), 1) if hold_days else 5.0
+
     return BacktestResult(
         success=True,
         error=None,
@@ -789,7 +1029,7 @@ def _calc_metrics(state, params, all_dates, all_data):
         lose_trades=n_lose,
         win_rate=round(win_rate, 4),
         profit_factor=round(profit_factor, 4),
-        avg_hold_days=5.0,
+        avg_hold_days=avg_hold_days,
         monthly_returns=monthly,
         equity_curve=list(state.equity_curve),
         drawdown_curve=list(zip(dates, [round(d, 4) for d in dd_curve])),
@@ -869,6 +1109,89 @@ def _result_to_dict(result: BacktestResult, params: BacktestParams, strategy_nam
     if result.error:
         d["error"] = result.error
     return d
+
+
+# ============================================================
+#  板块热度模拟（回测专用）
+# ============================================================
+
+# 热力缓存：避免每根 bar 重复计算全池 N 日涨幅
+_heat_cache = {'bar_i': -1, 'data': None, 'lookback': 5}
+
+def _compute_mock_sector_heat(all_data, bar_i, valid_codes, lookback=5, force_refresh=False):
+    """
+    回测模式：基于个股近 N 日涨幅模拟板块热度。
+
+    对池中每只股票计算 (close[bar_i] / close[bar_i-N] - 1)，
+    按涨幅排序分段赋分：
+      - top 20%  → 6-10 分（线性映射）
+      - 中间 40% → 1-5 分
+      - 底部 40% → 0 分
+    若有效样本不足 3 只，返回 None。
+
+    使用模块级缓存避免连续相同 bar_i 重复计算。
+    返回 {code6: float_score}，code6 格式如 "000001"。
+
+    热度校准说明：
+      - 当 market_regime == 'uptrend' 时，top 评分上移至 6-10
+      - 当 market_regime == 'downtrend' 时，top 评分压缩至 4-7
+      - 默认 lookback=5 捕捉短线热点，长线可传 10/20
+    """
+    global _heat_cache
+    if not force_refresh and _heat_cache['bar_i'] == bar_i and _heat_cache['lookback'] == lookback:
+        return _heat_cache['data']
+
+    returns = {}
+    for code in valid_codes:
+        df = all_data.get(code)
+        if df is None or bar_i < lookback or bar_i >= len(df):
+            continue
+        try:
+            close_now = float(df['close'].iloc[bar_i])
+            close_before = float(df['close'].iloc[bar_i - lookback])
+            if close_before > 0:
+                ret = (close_now - close_before) / close_before * 100
+                returns[code] = ret
+        except (IndexError, ValueError, TypeError):
+            continue
+
+    if len(returns) < 3:
+        _heat_cache = {'bar_i': bar_i, 'data': None, 'lookback': lookback}
+        return None
+
+    # 按涨幅从高到低排序
+    sorted_codes = sorted(returns.keys(), key=lambda c: returns[c], reverse=True)
+    n = len(sorted_codes)
+    bottom_n = int(n * 0.4)
+    top_n = max(int(n * 0.2), 1)
+    mid_n = n - bottom_n - top_n
+
+    heat_map = {}
+
+    # 底部 40% → 0 分
+    for code in sorted_codes[top_n + mid_n:]:
+        heat_map[code] = 0.0
+
+    # 中间 40% → 1-5 分（线性）
+    mid_start = top_n
+    mid_end = top_n + mid_n
+    for i, code in enumerate(sorted_codes[mid_start:mid_end]):
+        if mid_n > 1:
+            score = 1.0 + (i / (mid_n - 1)) * 4.0
+        else:
+            score = 3.0
+        heat_map[code] = round(score, 1)
+
+    # 顶部 20% → 6-10 分（线性）
+    for i, code in enumerate(sorted_codes[:top_n]):
+        if top_n > 1:
+            score = 6.0 + (i / (top_n - 1)) * 4.0
+        else:
+            score = 8.0
+        heat_map[code] = round(score, 1)
+
+    _heat_cache = {'bar_i': bar_i, 'data': heat_map, 'lookback': lookback}
+    return heat_map
 
 
 # ============================================================
@@ -1029,6 +1352,14 @@ class BacktestRunner:
                 qmt._g_init_done = False
                 runner.init(ctx)
                 init_done = True
+                print("  [板块] 回测模式: 基于近5日涨幅计算模拟板块热度")
+
+            # 模拟板块热度：每根 bar 计算个股近5日涨幅排名
+            # 注：handlebar 内部 _load_data → _run_sector_analysis 因文件不存在
+            # 返回空 dict，且 if bonus_map: 守卫不覆盖已设置的热度图
+            heat_map = _compute_mock_sector_heat(all_data, bar_i, valid_codes)
+            if heat_map and qmt._g_scorer:
+                qmt._g_scorer.update_sector_bonus(heat_map)
 
             try:
                 runner.handlebar(ctx)
@@ -1070,6 +1401,14 @@ class BacktestRunner:
             print("  [策略] 使用千问3.7版信号")
         else:
             import core.signal_main_rise as sig
+
+        # 强制关闭 SAFEMODE —— 配置文件开启了 safemode，但回测中需要真实交易
+        qmt.SAFEMODE_ENABLED = False
+
+        # 回测模式 bypass check_buy：通达信选股已筛过买点，池内的直接进8D评分
+        # 原始流程: pool → check_buy(卡77%) → 评分 → 买入
+        # 修正流程: pool → 评分 → 买入
+        qmt.check_buy = lambda df: (True, "池内(回测模式)", "pool")
 
         # 打补丁
         qmt.passorder = _backtest_passorder
@@ -1199,6 +1538,12 @@ class BacktestRunner:
                     _backtest_state = None
                     return BacktestResult(success=False, error=f"StrategyRunner.init 失败: {e}")
                 init_done = True
+                print("  [板块] 回测模式: 基于近5日涨幅计算模拟板块热度")
+
+            # 模拟板块热度（同上）
+            heat_map = _compute_mock_sector_heat(all_data, bar_i, params.stock_codes)
+            if heat_map and qmt._g_scorer:
+                qmt._g_scorer.update_sector_bonus(heat_map)
 
             try:
                 runner.handlebar(ctx)
