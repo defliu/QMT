@@ -1568,7 +1568,7 @@ def _check_and_execute_sell(C, today):
             continue
 
         order_id = _g_trader.sell(code, shares, remark='卖出简易')
-        if order_id:
+        if order_id is not None:
             state_obj = _g_sell_engine._states.get(code)
             _g_pending_sells[code] = {
                 'order_id': order_id,
@@ -1697,7 +1697,7 @@ def _check_limitdown_sells(C, today):
                             sell_vol = min(remaining_vol, available)
                             if sell_vol >= 100:
                                 order_id = _g_trader.sell(code, sell_vol, remark='跌停强卖')
-                                if order_id:
+                                if order_id is not None:
                                     _g_pending_sells[code] = dict(
                                         info,
                                         order_id=order_id,
@@ -1726,7 +1726,7 @@ def _check_limitdown_sells(C, today):
                 sell_vol = min(remaining_vol, available)
                 if sell_vol >= 100:
                     order_id = _g_trader.sell(code, sell_vol, remark='跌停放行')
-                    if order_id:
+                    if order_id is not None:
                         _g_pending_sells[code] = dict(
                             info,
                             order_id=order_id,
@@ -1785,7 +1785,7 @@ def _retry_pending_sell(code, info, C):
 
     use_market = info.get('retries', 0) >= 1  # 首次重试就用市价确保成交
     order_id = _g_trader.sell(code, new_vol, remark='卖出', use_market=use_market)
-    if order_id:
+    if order_id is not None:
         _g_pending_sells[code] = dict(
             info,
             order_id=order_id,
@@ -1907,7 +1907,7 @@ def _try_retry_queue(C):
             continue
 
         order_id = _g_trader.buy(code, volume, remark='重试')
-        if order_id:
+        if order_id is not None:
             _g_pending_buys[code] = {
                 'order_id': order_id,
                 'price': price,
@@ -2259,7 +2259,7 @@ def _execute_trade(C, today, dt):
             if volume >= 100:
                 print("    委托买入 %s  %d股  估算金额=%.0f" % (code, volume, volume * price))
                 order_id = _g_trader.buy(code, volume, remark='盘中')
-                if order_id:
+                if order_id is not None:
                     _g_pending_buys[code] = {
                         'order_id': order_id,
                         'price': price,
@@ -2608,7 +2608,7 @@ def _place_buy_order(C, code, today, dt):
         return
 
     order_id = _g_trader.buy(code, volume, remark='全天买入')
-    if order_id:
+    if order_id is not None:
         _g_pending_buys[code] = {
             'order_id': order_id,
             'price': price,
