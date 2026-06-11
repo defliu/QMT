@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p \"C:/Users/Administrator/.claude/projects/d--QMT-STRATEGIES/memory\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Administrator\\.claude\\projects\\d--QMT-STRATEGIES"
+    ]
+  }
+}

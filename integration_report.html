@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>QMT 策略端到端测试报告</title>
+<style>
+body { font-family: 'Segoe UI', sans-serif; margin: 20px; background: #f5f7fa; }
+h1 { color: #1a1a2e; }
+.container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+.summary { display: flex; gap: 20px; margin: 20px 0; flex-wrap: wrap; }
+.card { background: #e8ecf4; padding: 12px 20px; border-radius: 6px; min-width: 140px; }
+.card .num { font-size: 24px; font-weight: bold; color: #1a1a2e; }
+.card .label { font-size: 12px; color: #666; }
+table { width: 100%%; border-collapse: collapse; margin-top: 16px; }
+th { background: #2c3e50; color: #fff; padding: 10px 8px; text-align: left; font-size: 13px; }
+td { padding: 8px; border-bottom: 1px solid #eee; font-size: 13px; }
+tr:hover { background: #f0f4ff; }
+tr.signal { background: #e8f5e9; }
+tr.pooled { background: #fff8e1; }
+.err { color: #999; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+<h1>QMT 策略端到端测试报告</h1>
+<p>测试时间: 2026-06-09 10:49</p>
+<p>股票池: D:/QMT_POOL/selected.txt | 扫描: 32只 | 触发选股: 0只 | 触发买点: 3只 | 异常: 29只</p>
+
+<div class="summary">
+<div class="card"><div class="num">32</div><div class="label">扫描股票</div></div>
+<div class="card"><div class="num">0</div><div class="label">触发选股</div></div>
+<div class="card"><div class="num">3</div><div class="label">触发买点</div></div>
+<div class="card"><div class="num">27.1</div><div class="label">平均评分</div></div>
+<div class="card"><div class="num">0.0%%</div><div class="label">选股通过率</div></div>
+<div class="card"><div class="num">9.4%%</div><div class="label">买点触发率</div></div>
+</div>
+
+<table>
+<tr><th>代码</th><th>名称</th><th>选股信号</th><th>买点</th><th>评分</th><th>评级</th><th>理由</th><th>异常</th></tr>
+
+        <tr>
+            <td>688669.SH</td>
+            <td>聚石化学</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>688786.SH</td>
+            <td>悦安新材</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>600279.SH</td>
+            <td>重庆港</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>600293.SH</td>
+            <td>三峡新材</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr class="signal">
+            <td>600378.SH</td>
+            <td>昊华科技</td>
+            <td>-</td>
+            <td>pool</td>
+            <td>26.1</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">-</td>
+        </tr>
+        <tr>
+            <td>600552.SH</td>
+            <td>凯盛科技</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr class="signal">
+            <td>600985.SH</td>
+            <td>淮北矿业</td>
+            <td>-</td>
+            <td>pool</td>
+            <td>25.5</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">-</td>
+        </tr>
+        <tr class="signal">
+            <td>601001.SH</td>
+            <td>晋控煤业</td>
+            <td>-</td>
+            <td>pool</td>
+            <td>29.6</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">-</td>
+        </tr>
+        <tr>
+            <td>601137.SH</td>
+            <td>博威合金</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>603011.SH</td>
+            <td>合锻智能</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>603078.SH</td>
+            <td>江化微</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>603212.SH</td>
+            <td>赛伍技术</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>603733.SH</td>
+            <td>仙鹤股份</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>605018.SH</td>
+            <td>长华集团</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>605358.SH</td>
+            <td>立昂微</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>688017.SH</td>
+            <td>绿的谐波</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>688056.SH</td>
+            <td>莱伯泰科</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>688059.SH</td>
+            <td>华锐精密</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>688322.SH</td>
+            <td>奥比中光-W</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>688507.SH</td>
+            <td>索辰科技</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>688690.SH</td>
+            <td>纳微科技</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>688777.SH</td>
+            <td>中控技术</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>600226.SH</td>
+            <td>亨通股份</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>603683.SH</td>
+            <td>晶华新材</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>603725.SH</td>
+            <td>天安新材</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>605186.SH</td>
+            <td>健麾信息</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>603859.SH</td>
+            <td>XD能科科</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>603005.SH</td>
+            <td>晶方科技</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>600707.SH</td>
+            <td>彩虹股份</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>603158.SH</td>
+            <td>腾龙股份</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>600458.SH</td>
+            <td>时代新材</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+        <tr>
+            <td>600487.SH</td>
+            <td>亨通光电</td>
+            <td>-</td>
+            <td>-</td>
+            <td>-</td>
+            <td>D</td>
+            <td>-</td>
+            <td class="err">数据不足</td>
+        </tr>
+</table>
+
+<h2>汇总</h2>
+<p>选股通过率: 0.0% (0/32)</p>
+<p>买点触发率: 9.4% (3/32)</p>
+<p>平均评分: 27.1</p>
+<p>异常股票数: 29</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": [
+          {
+            "type": "always"
+          }
+        ],
+        "command": "if exist D:\\QMT_STRATEGIES\\strategy_main.py \"C:\\Users\\Administrator\\AppData\\Local\\Programs\\Python\\Python310\\python.exe\" D:\\QMT_STRATEGIES\\scripts\\validate_qmt_file.py D:\\QMT_STRATEGIES\\strategy_main.py"
+      }
+    ]
+  }
+}

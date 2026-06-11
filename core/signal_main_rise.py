@@ -37,6 +37,7 @@ class ScoreCalculator8D:
     GM_TARGET = 70.0
     DEBT_RATIO_SAFE = 30.0
     DEBT_RATIO_MAX = 65.0
+    # 2026-06: PE/PB放宽以适配当前A股整体偏高估值环境，避免因估值维度一刀切筛掉成长股
     PE_CENTER = 25.0
     PE_WIDTH = 30.0
     PB_CENTER = 3.0
@@ -383,21 +384,6 @@ class ScoreCalculator8D:
         else:
             score += 0.5
 
-        # 第8维度：买点信号
-        try:
-            signal_ok, _, buy_type = check_buy(df)
-            buy_score = 0
-            if signal_ok:
-                if buy_type == 'both':
-                    buy_score = 3     # 双买点 = 最高分
-                elif buy_type == 'buy2':
-                    buy_score = 2     # 趋势突破 = 高分
-                elif buy_type == 'buy1':
-                    buy_score = 1     # 回踩反包 = 基础分
-            score += buy_score * 2    # 权重2分
-        except Exception:
-            pass
-
         return round(min(score, 18.0), 2)
 
     def _capital_score(self, df):
@@ -701,7 +687,7 @@ class SectorAnalyzer:
 # ============================================================
 
 def check_buy(df, min_bars=60):
-    """买点信号过滤 — 调试模式/测试账号下直接通过，由8D打分做最终筛选。
+    """直通过滤器，买点筛选由上游选股+8D打分完成。
 
     返回 (buy: bool, signal: str, buy_type: str)
     - buy: True=可买入

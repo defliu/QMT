@@ -1353,6 +1353,7 @@ class BacktestRunner:
                 runner.init(ctx)
                 init_done = True
                 print("  [板块] 回测模式: 基于近5日涨幅计算模拟板块热度")
+                _compute_mock_sector_heat(None, -1, [], force_refresh=True)  # 清跨回测缓存
 
             # 模拟板块热度：每根 bar 计算个股近5日涨幅排名
             # 注：handlebar 内部 _load_data → _run_sector_analysis 因文件不存在
@@ -1539,6 +1540,7 @@ class BacktestRunner:
                     return BacktestResult(success=False, error=f"StrategyRunner.init 失败: {e}")
                 init_done = True
                 print("  [板块] 回测模式: 基于近5日涨幅计算模拟板块热度")
+                _compute_mock_sector_heat(None, -1, [], force_refresh=True)  # 清跨回测缓存
 
             # 模拟板块热度（同上）
             heat_map = _compute_mock_sector_heat(all_data, bar_i, params.stock_codes)

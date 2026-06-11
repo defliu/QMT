@@ -1,0 +1,63 @@
+# QMT 策略全局配置
+strategy:
+  name: "DUAL_BAND"
+  max_hold: 5
+  target_ratio: 0.16
+  hard_stop_loss: -0.08
+  kelly_conservative: 0.5
+  kelly_max: 0.20
+
+account:
+  id: "67014907"
+
+pool:
+  path: "D:/QMT_POOL/selected.txt"
+
+sell:
+  bottom_line_loss_pct: -0.05
+  bottom_line_daily_drop_pct: -0.07
+  warning_reduce_pct: 0.30
+  warning_add_reduce_pct: 0.20
+  volume_ratio_threshold: 1.5
+  volume_diverge_threshold: 0.70
+  macd_shorten_days: 3
+  ma5_slope_flat_deg: 15
+  confirm_reduce_pct: 0.50
+  clear_ma20_days: 3
+  rebound_window_days: 3
+  trailing_break_ma5_interval: 0.10
+  trailing_drawdown_lo: 0.06
+  trailing_drawdown_mid: 0.08
+  trailing_drawdown_hi: 0.10
+  chandelier_atr_multiple: 3
+  chandelier_min_lookback: 20
+  chandelier_lookback: 20
+  no_reentry_days: 20
+
+kdj:
+  n: 9
+  m1: 3
+  m2: 3
+
+vol_ma_period: 5
+
+safemode:
+  enabled: false
+  log_dir: "D:/QMT_POOL/safemode_logs/"
+  block_passorder: true
+  block_file_write: false
+
+debug_mode:
+  enabled: false   # true=全天候交易（strategy_allday.py专用），false=尾盘模式(14:40-14:57)
+
+paths:
+  pool_file: "D:/QMT_POOL/QMTselected.txt"
+  intraday_hold_file: "D:/QMT_POOL/endofday_holdings_beat.txt"
+  endofday_hold_file: "D:/QMT_POOL/intraday_holdings.txt"
+  intraday_nav_file: "D:/QMT_POOL/endofday_nav_beat.txt"
+  endofday_nav_file: "D:/QMT_POOL/endofday_nav.txt"
+  sector_heat_file: "D:/QMT_POOL/sector_heat.json"
+  pool_path: "D:/QMT_POOL/selected.txt"
+  trade_log_file: "D:/QMT_POOL/成交记录_尾盘_外部池_beat.txt"
+  score_history_file: "D:/QMT_POOL/endofday_score_history_beat.json"
+  intraday_sell_state_file: "D:/QMT_POOL/endofday_sell_state_beat.json"
