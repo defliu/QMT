@@ -7,19 +7,25 @@ Authoritative source: agent_hub/2026-06-13_backtest_mvp/03_interface_freeze.md
   - StrategyDecision shape : section 6  (6 top-level keys; diagnostics has 4 keys)
   - sell reasons / blocked : sections 7 / 8
 
-This task (2.1) only ships the SKELETON; the real evaluate_day body lands in
-Task 2.4 (integration). Until then evaluate_day returns make_empty_decision().
+Task 2.4 integrated: evaluate_day now drives the full pipeline
+  score_universe -> make_decision and merges scoring warnings into
+  decision.diagnostics.warnings. make_empty_decision() is preserved for
+  callers/tests that need a zeroed shape.
 
 3.6-safe constraints (03 section 1 constraint 3):
   - no `dict[str, ...]` / `list[str]` annotations
   - no `str | None` unions
   - no walrus, no match/case, no dataclass
-  - keep f-strings out of the hot path; this skeleton uses none
+  - keep f-strings out of the hot path; this module uses none
 
 Purity constraints (03 section 1 constraints 1 & 2):
   - no IO / network / time-based randomness
   - no xtquant / passorder / get_trade_detail_data / ContextInfo imports
+  - inputs are not mutated (None aux_data is rebuilt as a fresh empty dict)
 """
+
+from backtest.strategy_core.scoring_adapter import score_universe
+from backtest.strategy_core.decision import make_decision
 
 
 def make_empty_decision():
@@ -76,13 +82,48 @@ def evaluate_day(
 ):
     """Decide T+1 (or T close) trading intentions for current_date.
 
-    See 03 section 1 for the full contract. This skeleton intentionally returns
-    make_empty_decision(); Task 2.4 fills in the real scoring/selection/risk
-    pipeline. Keep the parameter order and names exactly as listed -- they are
-    part of the frozen interface (03 section 1 constraint 4).
+    Integration pipeline (Task 2.4):
+      1. score_universe(market_window) -> records (per 03 section 6
+         diagnostics.scores schema) + warnings.
+      2. make_decision(...) -> full StrategyDecision dict.
+      3. Append scoring warnings into decision.diagnostics.warnings.
+
+    See 03 section 1 for the full contract. Keep parameter order/names as
+    listed -- they are part of the frozen interface (03 section 1
+    constraint 4).
+
+    Notes on purity / None handling:
+      - aux_data may be None; we substitute a fresh empty dict locally so
+        downstream code (decision layer reads aux_data.get("warnings", []))
+        does not crash. The caller's None is never written to.
+      - sector_heat_mode != "zero" intentionally raises NotImplementedError
+        out of score_universe (03 section 4 constraint 2).
     """
-    # Bind locals so static analysers don't flag them as unused; this is a
-    # skeleton, not a TODO -- behaviour ships in Task 2.4.
-    _ = (current_date, market_window, positions, cash, universe,
-         account_state, strategy_config, aux_data)
-    return make_empty_decision()
+    cfg = strategy_config or {}
+    sector_heat_mode = cfg.get("sector_heat_mode", "zero")
+    aux_for_pipeline = aux_data if aux_data is not None else {}
+
+    score_records, score_warnings = score_universe(
+        market_window or {},
+        sector_heat_mode=sector_heat_mode,
+        aux_data=aux_for_pipeline,
+        return_warnings=True,
+    )
+
+    decision = make_decision(
+        current_date=current_date,
+        market_window=market_window,
+        positions=positions,
+        cash=cash,
+        universe=universe,
+        account_state=account_state,
+        strategy_config=strategy_config,
+        aux_data=aux_for_pipeline,
+        score_records=score_records,
+    )
+
+    # Merge scoring warnings into decision diagnostics (03 section 6 key 3).
+    if score_warnings:
+        decision["diagnostics"]["warnings"].extend(score_warnings)
+
+    return decision
