@@ -1,0 +1,28 @@
+# coding: utf-8
+# Backtest factory v0.2 — batch experiments declaration
+# Authoritative spec: SPEC_BACKTEST_MVP_OFFLINE_FACTORY_v0.2.md §2.5
+# Authoritative interface: 03_interface_freeze.md
+# Authoritative output: 04_output_schema_freeze.md
+#
+# Format:
+#   batch.id            -> short identifier; becomes <batch_id>.csv summary file name suffix
+#   batch.base          -> path (relative to repo root) of base yaml inherited by every leaf
+#   grid.<dotted-path>  -> list of values to sweep on that yaml field
+#                          (cartesian product across all grid.* keys)
+#
+# The runner expands grid into N leaf configs, calls run_backtest per leaf, then writes one
+# row per leaf to F:/backtest_workspace/batch_summary/<batch_id>_<run_started>.csv.
+#
+# Boundaries (night-shift §四):
+#   * Reads only D: code paths.
+#   * Writes only F:/backtest_workspace/batch_summary/ + per-run F:/.../results/.
+#   * Never C:/D: large products; never F:/金策智算/ writes; never xtquant.
+
+batch:
+  id:   baseline_grid
+  base: backtest/configs/baseline.yaml
+
+grid:
+  strategy.max_positions:        [3, 5]
+  strategy.min_score:             [55.0, 60.0]
+  strategy.score_gap_threshold:   [15.0]
