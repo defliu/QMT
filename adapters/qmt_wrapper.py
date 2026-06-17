@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 
-from core.utils import ema, ma, safe_last
+from core.utils import calc_bias, ema, ma, safe_last
 from core.signal_main_rise import SectorAnalyzer, check_buy
 from core.scoring.switch_scorer import SwitchScorer
 from core.signal_main_rise import REQUIRED_BARS, MIN_BARS
@@ -65,13 +65,15 @@ STRATEGY_NAME = '双带主升浪_尾盘_外部池_beat四层版'
 
 STRATEGY_CAPITAL = 100000
 MAX_HOLD = 3
-TARGET_RATIO = 0.25
-MAX_TOTAL_RATIO = 0.85
-FIXED_AMOUNT_PER_STOCK = 20000
+TARGET_RATIO = 0.30
+MAX_TOTAL_RATIO = 0.90
+FIXED_AMOUNT_PER_STOCK = 30000
 HARD_STOP_LOSS = -0.08
 N_SELL = 7
 
 BATCH_SIZE = 500
+MAX_BUY_BIAS5 = 10.0
+MAX_SELL_RETRIES = 5
 
 POOL_FILE = _path_config.get('pool_file', 'D:/QMT_POOL/QMTselected.txt')
 INTRADAY_HOLD_FILE = _path_config.get('intraday_hold_file', 'D:/QMT_POOL/endofday_holdings_beat.txt')
@@ -673,13 +675,84 @@ def _load_data(C, dt=None):
 
 
 def _run_sector_analysis(C, dt):
-    """板块热度：优先预计算文件，失败则走 QMT API。"""
+    """板块热度：优先预计算文件，失败则走 QMT API，最后用行情数据兜底。"""
     analyzer = SectorAnalyzer()
     bonus = analyzer.calc_top10(dt=dt)
     if bonus:
         return bonus
     # QMT API fallback
-    return _calc_sector_heat_qmt(C, dt)
+    bonus = _calc_sector_heat_qmt(C, dt)
+    if bonus:
+        return bonus
+    # 最终兜底：基于已加载行情数据模拟板块热度
+    return _calc_sector_heat_from_ohlcv()
+
+
+def _calc_sector_heat_from_ohlcv(lookback=5):
+    """基于已加载的日K线数据模拟板块热度。
+
+    对池中每只股票计算 (close[-1] / close[-1-lookback] - 1)，
+    按涨幅排序分段赋分：
+      - top 20%  → 6-10 分（线性映射）
+      - 中间 40% → 1-5 分
+      - 底部 40% → 0 分
+    若有效样本不足 3 只，返回空。
+
+    返回: {stock_code: heat_score, ...}，code 带后缀如 "000001.SZ"
+    """
+    global _g_all_data
+
+    if not _g_all_data or len(_g_all_data) < 3:
+        return {}
+
+    returns = {}
+    for code, df in _g_all_data.items():
+        if df is None or len(df) <= lookback:
+            continue
+        try:
+            close_now = float(df['close'].iloc[-1])
+            close_before = float(df['close'].iloc[-1 - lookback])
+            if close_before > 0:
+                ret = (close_now - close_before) / close_before * 100.0
+                returns[code] = ret
+        except (IndexError, ValueError, TypeError, KeyError):
+            continue
+
+    n = len(returns)
+    if n < 3:
+        print("  [板块] 基于K线兜底：有效样本不足 %d 只，跳过" % n)
+        return {}
+
+    sorted_codes = sorted(returns.keys(), key=lambda c: returns[c], reverse=True)
+    bottom_n = int(n * 0.4)
+    top_n = max(int(n * 0.2), 1)
+    mid_n = n - bottom_n - top_n
+
+    heat_map = {}
+
+    # 底部 40% → 0 分
+    for code in sorted_codes[top_n + mid_n:]:
+        heat_map[code] = 0.0
+
+    # 中间 40% → 1-5 分（线性）
+    for i, code in enumerate(sorted_codes[top_n:top_n + mid_n]):
+        if mid_n > 1:
+            score = 1.0 + (float(i) / (mid_n - 1)) * 4.0
+        else:
+            score = 3.0
+        heat_map[code] = round(score, 1)
+
+    # 顶部 20% → 6-10 分（线性）
+    for i, code in enumerate(sorted_codes[:top_n]):
+        if top_n > 1:
+            score = 6.0 + (float(i) / (top_n - 1)) * 4.0
+        else:
+            score = 8.0
+        heat_map[code] = round(score, 1)
+
+    print("  [板块] 基于K线兜底：%d 只股票，top 5 日涨幅 %.1f%% ~ %.1f%%" % (
+        n, returns[sorted_codes[0]], returns[sorted_codes[-1]]))
+    return heat_map
 
 
 def _calc_sector_heat_qmt(C, dt):
@@ -747,11 +820,16 @@ def _get_all_d_concept_sectors(C):
     sectors = []
     try:
         all_sectors = C.get_sector_list()
+        total = len(all_sectors)
+        matched = 0
         for sec in all_sectors:
             if sec.startswith('D概念'):
                 sectors.append(sec)
+                matched += 1
             elif sec.startswith('概念'):
                 sectors.append(sec)
+                matched += 1
+        print("  [板块] 匹配到 %d 个概念板块 (过滤条件: 'D概念' 或 '概念' 前缀)" % matched)
     except AttributeError:
         pass
     except Exception as e:
@@ -822,6 +900,21 @@ def _score_display(d, key):
     return "%.2f" % v if isinstance(v, (int, float)) else v
 
 
+def _calc_buy_bias5(df):
+    if df is None or len(df) < 5 or 'close' not in df.columns:
+        return 0.0
+    close = df['close']
+    return calc_bias(safe_last(close), safe_last(ma(close, 5)))
+
+
+def _passes_buy_bias_filter(code, df, label='买入过滤'):
+    bias5 = _calc_buy_bias5(df)
+    if bias5 > MAX_BUY_BIAS5:
+        print("  [%s] %s MA5乖离率 %.2f%% > %.2f%%，跳过" % (label, code, bias5, MAX_BUY_BIAS5))
+        return False
+    return True
+
+
 def _run_selection(C):
     result = []
     for code, df in _g_all_data.items():
@@ -829,6 +922,8 @@ def _run_selection(C):
             continue
         buy, signal, buy_type = check_buy(df)
         if not buy:
+            continue
+        if not _passes_buy_bias_filter(code, df):
             continue
         if _is_st_stock(code, C):
             continue
@@ -963,14 +1058,42 @@ def _get_current_price(code, C=None):
     if C is not None:
         try:
             tick = C.get_full_tick([code])
-            if tick and code in tick and tick[code].get('lastPrice', 0) > 0:
-                return float(tick[code]['lastPrice'])
+            return _price_from_tick(code, tick)
         except Exception:
             pass
+    return _fallback_close_price(code)
+
+
+def _price_from_tick(code, tick):
+    if tick and code in tick and tick[code].get('lastPrice', 0) > 0:
+        return float(tick[code]['lastPrice'])
+    return None
+
+
+def _fallback_close_price(code):
     df = _g_all_data.get(code)
     if df is None:
         return None
     return float(df['close'].iloc[-1])
+
+
+def _get_current_prices(codes, C=None):
+    prices = {}
+    if C is not None and codes:
+        try:
+            tick = C.get_full_tick(list(codes))
+            for code in codes:
+                p = _price_from_tick(code, tick)
+                if p and p > 0:
+                    prices[code] = p
+        except Exception:
+            pass
+    for code in codes:
+        if code not in prices:
+            p = _fallback_close_price(code)
+            if p and p > 0:
+                prices[code] = p
+    return prices
 
 
 def _is_limit_up(code, C):
@@ -1191,6 +1314,8 @@ def _print_holdings_report(C, today):
             for code in pool_codes:
                 df = _g_all_data.get(code)
                 if df is None or len(df) < 60:
+                    continue
+                if not _passes_buy_bias_filter(code, df, label='换股候选过滤'):
                     continue
                 try:
                     r = _g_scorer.score_single(stock_code=code, df=df)
@@ -1527,7 +1652,8 @@ def _check_and_execute_sell(C, today):
         if pos:
             positions_data[code] = pos
 
-    raw_decisions = _g_sell_engine.evaluate(today, _g_my_codes, _g_all_data, positions_data)
+    rt_prices = _get_current_prices(list(_g_my_codes.keys()), C)
+    raw_decisions = _g_sell_engine.evaluate(today, _g_my_codes, _g_all_data, positions_data, rt_prices)
 
     # 防刷屏：卖出决策变化时才打印诊断表
     if raw_decisions:
@@ -1602,6 +1728,9 @@ def _confirm_engine_clear(code, today, info):
 def _check_pending_sells(C, today):
     global _g_pending_sells, _g_pending_limitdown_sells, _g_cumulative_pnl
 
+    if C is None:
+        return
+
     if not _g_pending_sells:
         return
 
@@ -1623,7 +1752,7 @@ def _check_pending_sells(C, today):
             ex = o.m_strExchangeID
             oc = "%s.%s" % (inst, ex)
             oid = getattr(o, 'm_nOrderID', None)
-            if oc == code and (oid == info['order_id'] or oid is None):
+            if oc == code and oid is not None and oid == info['order_id']:
                 found_order = o
                 break
 
@@ -1639,10 +1768,11 @@ def _check_pending_sells(C, today):
                 print("  [卖出确认] %s 全部成交 (持仓确认)" % code)
                 _confirm_engine_clear(code, today, info)
             else:
+                _g_trader.cancel_order(info['order_id'], code)
                 if code not in _g_retry_skip_printed:
                     _g_retry_skip_printed.add(code)
-                    print("  [卖出重试] %s 订单未找到，重新委托" % code)
-                _retry_pending_sell(code, info, C)
+                    print("  [卖出重试] %s 订单未找到，撤单后重新委托" % code)
+                _retry_pending_sell(code, dict(info, retries=info.get('retries', 0) + 1), C)
             continue
 
         vol_traded = getattr(found_order, 'm_nVolumeTraded', 0)
@@ -1655,6 +1785,18 @@ def _check_pending_sells(C, today):
             _g_trader.cancel_order(info['order_id'], code)
             remaining = info['volume'] - vol_traded
             print("  [部成撤单] %s 已成交%d, 剩余%d股继续卖" % (code, vol_traded, remaining))
+            sell_price = info.get('sell_price', 0)
+            cost_price = info.get('cost', 0)
+            if cost_price > 0 and sell_price > 0:
+                realized = (sell_price - cost_price) * vol_traded
+                global _g_cumulative_pnl
+                _g_cumulative_pnl += realized
+                write_nav_file(INTRADAY_NAV_FILE, _g_cumulative_pnl)
+                print("    已实现盈亏: %+.0f  累计: %+.0f" % (realized, _g_cumulative_pnl))
+            _append_trade_record(C, '卖出', code, sell_price, vol_traded,
+                                 profit_pct=info.get('pct', 0),
+                                 profit_amount=(sell_price - cost_price) * vol_traded if cost_price > 0 and sell_price > 0 else 0)
+            _g_trade_records.append({'type':'卖出','code':code,'direction':'卖','volume':vol_traded,'price':sell_price,'amount':sell_price*vol_traded,'status':'成交'})
             _retry_pending_sell(code, dict(info, volume=remaining), C)
         else:
             _g_trader.cancel_order(info['order_id'], code)
@@ -1667,7 +1809,6 @@ def _check_pending_sells(C, today):
                     timestamp=datetime.now().strftime('%Y%m%d'),
                 )
                 _g_pending_sells.pop(code, None)
-                _g_my_codes.pop(code, None)
                 print("  [跌停暂缓] %s 跌停中，移入等待队列" % code)
             else:
                 print("  [卖出撤单] %s 未成交(已等%d次)，撤单重试..." % (code, info['checks']))
@@ -1762,10 +1903,16 @@ def _finish_pending_sell(C, code, info, vol_traded):
     _append_log('卖出成交: %s %d股 @ %.2f' % (code, vol_traded, sell_price))
     _g_trade_records.append({'type':'卖出','code':code,'direction':'卖','volume':vol_traded,'price':sell_price,'amount':sell_price*vol_traded,'status':'成交'})
     _g_pending_sells.pop(code, None)
-    _g_my_codes.pop(code, None)
+    pos = _g_trader.get_position(code) if _g_trader else None
+    if pos is None or pos.get('volume', 0) <= 0:
+        _g_my_codes.pop(code, None)
 
 
 def _retry_pending_sell(code, info, C):
+    if info.get('retries', 0) >= MAX_SELL_RETRIES:
+        print("    -> %s 已重试%d次仍失败，放弃卖出" % (code, MAX_SELL_RETRIES))
+        _g_pending_sells.pop(code, None)
+        return
     new_price = _get_current_price(code, C)
     if not new_price or new_price <= 0:
         new_retries = info.get('retries', 0) + 1
@@ -1815,6 +1962,10 @@ def _try_buy_replacement(C, remark):
     from core.risk_manager import NO_REENTRY_DAYS
 
     today = _get_qmt_time(C).strftime('%Y%m%d')
+    total_held = len(_g_my_codes) + len(_g_pending_buys)
+    if total_held >= MAX_HOLD:
+        print("  [补买] 持仓已满(%d/%d)，放弃补买" % (total_held, MAX_HOLD))
+        return False
     skip = set(_g_pending_buys.keys())
     skip |= set(_g_my_codes.keys())
 
@@ -1936,6 +2087,7 @@ def _check_pending_orders(C):
         print("  [待成交] 查询订单失败: %s" % e)
         return
 
+    original_pending_codes = set(_g_pending_buys.keys())
     still_pending = {}
     for code, info in list(_g_pending_buys.items()):
         found_order = None
@@ -1944,7 +2096,7 @@ def _check_pending_orders(C):
             ex = o.m_strExchangeID
             oc = "%s.%s" % (inst, ex)
             oid = getattr(o, 'm_nOrderID', None)
-            if oc == code and (oid == info['order_id'] or oid is None):
+            if oc == code and oid is not None and oid == info['order_id']:
                 found_order = o
                 break
 
@@ -2016,7 +2168,11 @@ def _check_pending_orders(C):
                 print("    -> 无法获取价格，尝试替补")
                 _try_buy_replacement(C, '盘中')
 
-    _g_pending_buys = still_pending
+    new_pending = dict(still_pending)
+    for k, v in _g_pending_buys.items():
+        if k not in original_pending_codes:
+            new_pending[k] = v
+    _g_pending_buys = new_pending
 
 
 # ============================================================
@@ -2227,10 +2383,9 @@ def _execute_trade(C, today, dt):
     for s in buyable:
         print("    %s  总分=%.2f  信号=%s" % (s['code'], s['score'], s['signal']))
 
-    per_stock_amount_raw = current_nav * MAX_TOTAL_RATIO / MAX_HOLD
+    per_stock_amount_raw = current_nav * TARGET_RATIO
     if buyable and budget > 0:
         per_stock_amount_raw = min(per_stock_amount_raw, budget / len(buyable))
-    per_stock_amount_raw = min(per_stock_amount_raw, FIXED_AMOUNT_PER_STOCK)
     per_stock_amount = int(per_stock_amount_raw / 100) * 100
     if per_stock_amount < 100:
         print("  单只金额不足100股，跳过买入")
@@ -2434,6 +2589,8 @@ def _execute_full_cycle(C, today, dt):
         buy, signal, buy_type = check_buy(df)
         if not buy:
             continue
+        if not _passes_buy_bias_filter(code, df, label='全天买入过滤'):
+            continue
         if _is_st_stock(code, C):
             continue
         signal_candidates.append({'code': code, 'signal': signal, 'buy_type': buy_type})
@@ -2475,7 +2632,8 @@ def _all_day_decision_matrix(C, today, dt, scored_candidates, held_scores):
         if pos:
             positions_data[code] = pos
 
-    raw_decisions = _g_sell_engine.evaluate(today, _g_my_codes, _g_all_data, positions_data)
+    rt_prices = _get_current_prices(list(_g_my_codes.keys()), C)
+    raw_decisions = _g_sell_engine.evaluate(today, _g_my_codes, _g_all_data, positions_data, rt_prices)
 
     for code, dec, shares in raw_decisions:
         df = _g_all_data.get(code)
@@ -2600,8 +2758,7 @@ def _place_buy_order(C, code, today, dt):
     if budget <= 0:
         print("    [买入] %s 预算不足 (budget=%.0f)，跳过" % (code, budget))
         return
-    amount = min(_g_per_stock_amount if _g_per_stock_amount > 0 else FIXED_AMOUNT_PER_STOCK, budget)
-    amount = min(amount, FIXED_AMOUNT_PER_STOCK)
+    amount = min(_g_per_stock_amount if _g_per_stock_amount > 0 else current_nav * TARGET_RATIO, budget)
     volume = int(amount / price / 100) * 100
     if volume < 100:
         print("    [买入] %s 不足100股" % code)
@@ -2658,6 +2815,7 @@ class StrategyRunner(object):
             account_id=ACCOUNT_ID,
             state_file=INTRADAY_SELL_STATE_FILE,
             is_intraday=False,
+            hard_stop_loss=HARD_STOP_LOSS,
         )
         _g_sell_engine.load_state()
 
@@ -2680,7 +2838,7 @@ class StrategyRunner(object):
         global _g_last_date, _g_today_done, _g_data_loaded, _g_my_codes, _g_cumulative_pnl, _g_wait_printed
         global _g_pending_buys, _g_retry_queue, _g_candidate_queue, _g_per_stock_amount
         global _g_pending_sells, _g_pending_limitdown_sells, _g_sell_engine
-        global _g_op_executed, _g_startup_done
+        global _g_op_executed, _g_startup_done, _g_all_data, _g_index_data, _g_last_sell_fingerprint
 
         dt = _get_qmt_time(C)
         today = dt.strftime('%Y%m%d')
@@ -2703,6 +2861,10 @@ class StrategyRunner(object):
             _g_candidate_queue = []
             _g_per_stock_amount = 0
             _g_pending_sells = {}
+            _g_pending_limitdown_sells = {}
+            _g_startup_done = False
+            _g_all_data = {}
+            _g_index_data = None
             _reset_log_buffers()
             if _g_sell_engine:
                 _g_sell_engine.load_state()
@@ -2766,7 +2928,7 @@ class StrategyRunner(object):
                     for code, info in list(_g_pending_sells.items()):
                         _g_trader.cancel_order(info['order_id'], code)
                         print("  [%s] 收盘撤单 %s 卖出%s" % (STRATEGY_NAME, code, info['order_id']))
-                    _g_pending_sells = {}
+                _g_pending_sells = {}
                 _check_sell(C, today)
                 _print_holdings_report(C, today)
                 _g_today_done = True

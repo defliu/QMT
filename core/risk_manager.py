@@ -178,7 +178,7 @@ class SellStrategyEngine:
     #  公开入口
     # ================================================================
 
-    def evaluate(self, today, holdings_dict, all_data, positions_data=None):
+    def evaluate(self, today, holdings_dict, all_data, positions_data=None, rt_prices=None):
         """
         主入口：执行分层卖出检查，返回决策列表。
 
@@ -188,11 +188,14 @@ class SellStrategyEngine:
             all_data: {code: DataFrame} 行情数据
             positions_data: {code: {'cost': float, 'can_use': int, 'volume': int}}
                             QMT 持仓数据（由 adapter 层传入）
+            rt_prices: {code: float} 盘中实时价格，用于底线层计算
 
         返回: [(code, SellDecision, shares_to_sell), ...]
         """
         if positions_data is None:
             positions_data = {}
+        if rt_prices is None:
+            rt_prices = {}
 
         decisions = []
         if not holdings_dict:
@@ -205,7 +208,7 @@ class SellStrategyEngine:
 
             state = self._get_state(code)
             if state is None:
-                state = SellPositionState(code=code)
+                state = SellPositionState(code=code, entry_date=today)
 
             # ---- 同步外部数据到状态 ----
             close = df['close'].astype(float)
@@ -215,7 +218,7 @@ class SellStrategyEngine:
             pos = positions_data.get(code, {})
             if state.cleared and pos.get('volume', 0) > 0:
                 if self.is_reentry_allowed(code, today, df):
-                    state = SellPositionState(code=code)
+                    state = SellPositionState(code=code, entry_date=today)
             cost_price = pos.get('cost', 0)
             if cost_price > 0:
                 state.cost_price = cost_price
@@ -227,7 +230,8 @@ class SellStrategyEngine:
             state.highest_price = highest
 
             # ---- 分层评估 ----
-            decision = self._evaluate_position(code, df, state, today)
+            rt_price = rt_prices.get(code)
+            decision = self._evaluate_position(code, df, state, today, rt_price)
 
             if decision.action != Action.HOLD:
                 shares_to_sell = int(state.current_shares * decision.sell_pct)
@@ -396,7 +400,7 @@ class SellStrategyEngine:
     #  分层决策引擎
     # ================================================================
 
-    def _evaluate_position(self, code, df, state, today):
+    def _evaluate_position(self, code, df, state, today, rt_price=None):
         """
         按优先级执行分层评估。
         返回 SellDecision。
@@ -408,7 +412,7 @@ class SellStrategyEngine:
         volume = df['volume'].astype(float)
 
         # ① 底线层（最高优先级）
-        decision = self._check_bottom_line(close, high, code, state, today)
+        decision = self._check_bottom_line(close, high, code, state, today, rt_price)
         if decision.action != Action.HOLD:
             return decision
 
@@ -463,23 +467,27 @@ class SellStrategyEngine:
     #  底线层
     # ================================================================
 
-    def _check_bottom_line(self, close, high, code, state, today):
+    def _check_bottom_line(self, close, high, code, state, today, rt_price=None):
         """底线层：硬止损检查"""
         if len(close) < 2:
             return SellDecision.hold()
 
-        current_price = float(close.iloc[-1])
+        if rt_price is not None:
+            current_price = rt_price
+        else:
+            current_price = float(close.iloc[-1])
+        prev_close = float(close.iloc[-2])
+
         signals = []
 
         if state.cost_price > 0:
             loss_pct = (current_price - state.cost_price) / state.cost_price
-            if loss_pct <= BOTTOM_LINE_LOSS_PCT:
+            if loss_pct <= self.hard_stop_loss:
                 signals.append("累计亏损%.1f%%" % (loss_pct * 100))
                 return SellDecision.clear(
                     code, "硬止损:累计亏损%.1f%%" % (loss_pct * 100), "底线层", signals
                 )
 
-        prev_close = float(close.iloc[-2])
         if prev_close > 0:
             daily_drop = (current_price - prev_close) / prev_close
             if daily_drop <= BOTTOM_LINE_DAILY_DROP_PCT:
@@ -677,7 +685,7 @@ class SellStrategyEngine:
             curr = float(close.iloc[-1])
             loss_pct = (curr - cost_price) / cost_price * 100
             layers['bottom_line']['累积亏损'] = {
-                'triggered': loss_pct <= BOTTOM_LINE_LOSS_PCT * 100,
+                'triggered': loss_pct <= self.hard_stop_loss * 100,
                 'value': '%.1f%%' % loss_pct,
             }
             prev_close = float(close.iloc[-2])
