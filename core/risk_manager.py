@@ -36,11 +36,11 @@ CLEAR_MA20_DAYS = 3
 # ---- 反弹检测 ----
 REBOUND_WINDOW_DAYS = 3
 
-# ---- 移动止盈 ----
+# ---- 移动止盈 ATR 自适应（V1.1）----
 TRAILING_BREAK_MA5_INTERVAL = 0.10
-TRAILING_DRAWDOWN_LO = 0.06
-TRAILING_DRAWDOWN_MID = 0.08
-TRAILING_DRAWDOWN_HI = 0.10
+TRAILING_ATR_N = 2.5              # 动态阈值 ATR 倍数
+TRAILING_DRAWDOWN_FLOOR = 0.06    # 回撤阈值下限（替代旧 LO，语义合并）
+TRAILING_DRAWDOWN_CAP = 0.15      # 回撤阈值上限
 CHANDELIER_ATR_MULTIPLE = 3
 
 # ---- 纪律 ----
@@ -574,8 +574,28 @@ class SellStrategyEngine:
     #  移动止盈
     # ================================================================
 
+    def _calc_dynamic_drawdown_threshold(self, highest_price, atr):
+        """计算动态回撤阈值。
+
+        公式：max(固定下限, N × ATR / 最高价)
+        限制：上限 15%
+
+        参数:
+            highest_price: 持仓期间最高价
+            atr: ATR(14) 值
+
+        返回:
+            float: 动态回撤阈值 (0.06 ~ 0.15)
+        """
+        if highest_price <= 0 or atr <= 0:
+            return TRAILING_DRAWDOWN_FLOOR
+
+        atr_pct = TRAILING_ATR_N * atr / highest_price
+        dynamic = max(TRAILING_DRAWDOWN_FLOOR, atr_pct)
+        return min(dynamic, TRAILING_DRAWDOWN_CAP)
+
     def _check_trailing_profit(self, close, high, low, state):
-        """检查移动止盈条件。"""
+        """检查移动止盈条件（V1.1 ATR 自适应版）。"""
         if state.cost_price <= 0 or state.highest_price <= 0:
             return False
 
@@ -586,33 +606,45 @@ class SellStrategyEngine:
         if profit_pct <= 0:
             return False
 
+        # 低盈利：MA5 断线
         if profit_pct < TRAILING_BREAK_MA5_INTERVAL:
             ma5 = float(close.rolling(5).mean().iloc[-1])
             if current_price < ma5:
                 return True
             return False
 
-        if profit_pct < 0.20:
-            if drawdown >= TRAILING_DRAWDOWN_LO:
-                return True
-            return False
-
-        if profit_pct < 0.30:
-            if drawdown >= TRAILING_DRAWDOWN_MID:
-                return True
-            return False
-
-        if drawdown >= TRAILING_DRAWDOWN_HI:
-            return True
-
+        # 计算 ATR（用于动态阈值和吊灯止损）
+        atr = None
         if len(close) >= CHANDELIER_LOOKBACK:
-            atr = calc_atr(close, high, low, n=14)
-            current_atr = float(atr.iloc[-1])
-            chandelier_level = state.highest_price - CHANDELIER_ATR_MULTIPLE * current_atr
+            atr_series = calc_atr(close, high, low, n=14)
+            atr = float(atr_series.iloc[-1])
+
+        # 动态回撤阈值
+        if atr is not None:
+            dd_threshold = self._calc_dynamic_drawdown_threshold(
+                state.highest_price, atr)
+        else:
+            dd_threshold = TRAILING_DRAWDOWN_FLOOR
+
+        # 中盈利：动态回撤 + 吊灯止损
+        if profit_pct < 0.20:
+            if drawdown >= dd_threshold:
+                return True
+            if atr is not None:
+                chandelier_level = state.highest_price - CHANDELIER_ATR_MULTIPLE * atr
+                if current_price <= chandelier_level:
+                    return True
+            return False
+
+        # 高盈利：吊灯止损为主
+        if atr is not None:
+            chandelier_level = state.highest_price - CHANDELIER_ATR_MULTIPLE * atr
             if current_price <= chandelier_level:
                 return True
 
-        return False
+        # 兜底：动态回撤（高盈利区间用更宽松阈值）
+        high_profit_dd = min(dd_threshold * 1.5, TRAILING_DRAWDOWN_CAP)
+        return drawdown >= high_profit_dd
 
     # ================================================================
     #  全层诊断（只读，不修改状态）
@@ -753,7 +785,7 @@ class SellStrategyEngine:
         c3_t = self._signal_break_highest_low(close, high, low)
         layers['clear']['C3破低'] = {'triggered': c3_t, 'value': ''}
 
-        # ---- 移动止盈 ----
+        # ---- 移动止盈（V1.1 ATR 自适应版）----
         trailing_t = False
         trailing_detail = ''
 
@@ -771,13 +803,32 @@ class SellStrategyEngine:
                         '已破MA5' if below_ma5 else '未破MA5')
                     trailing_t = below_ma5
                 else:
-                    trailing_detail = '盈利%+.1f%%, 回撤%.1f%%' % (profit_pct_val, drawdown_pct)
-                    if profit_pct_val < 20:
-                        trailing_t = drawdown_pct >= TRAILING_DRAWDOWN_LO * 100
-                    elif profit_pct_val < 30:
-                        trailing_t = drawdown_pct >= TRAILING_DRAWDOWN_MID * 100
+                    # 计算 ATR
+                    atr = None
+                    if len(close) >= CHANDELIER_LOOKBACK:
+                        atr_series = calc_atr(close, high, low, n=14)
+                        atr = float(atr_series.iloc[-1])
+
+                    # 动态回撤阈值
+                    if atr is not None:
+                        dd_threshold = self._calc_dynamic_drawdown_threshold(
+                            highest_price, atr) * 100
                     else:
-                        trailing_t = drawdown_pct >= TRAILING_DRAWDOWN_HI * 100
+                        dd_threshold = TRAILING_DRAWDOWN_FLOOR * 100
+
+                    if profit_pct_val < 20:
+                        trailing_t = drawdown_pct >= dd_threshold
+                        trailing_detail = '盈利%+.1f%%, 回撤%.1f%%, 阈值%.1f%%' % (
+                            profit_pct_val, drawdown_pct, dd_threshold)
+                    else:
+                        # 高盈利：吊灯优先，动态回撤兜底
+                        chandelier_t = (atr is not None and
+                                        current_price <= highest_price - CHANDELIER_ATR_MULTIPLE * atr)
+                        high_profit_dd = min(dd_threshold * 1.5, TRAILING_DRAWDOWN_CAP * 100)
+                        trailing_t = chandelier_t or (drawdown_pct >= high_profit_dd)
+                        trailing_detail = '盈利%+.1f%%, 吊灯=%s, 回撤%.1f%%, 阈值%.1f%%' % (
+                            profit_pct_val, '触发' if chandelier_t else '未触发',
+                            drawdown_pct, high_profit_dd)
 
         layers['trailing']['移动止盈'] = {
             'triggered': trailing_t,

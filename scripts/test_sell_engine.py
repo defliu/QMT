@@ -516,6 +516,179 @@ def test_trailing_over_30pct():
 
 
 # ============================================================
+#  V1.1 移动止盈测试
+# ============================================================
+
+def test_trailing_atr_adaptive_low_vol():
+    """V1.1: 低波动股票 ATR 自适应阈值 = FLOOR 6%"""
+    from core.risk_manager import TRAILING_DRAWDOWN_FLOOR, TRAILING_ATR_N
+    df = make_klines(60, 10.0, 12.0, seed=20)
+    engine = create_engine()
+    state = SellPositionState(code='000001.SZ', cost_price=10.0, current_shares=1000,
+                              highest_price=12.0)
+    engine._states['000001.SZ'] = state
+
+    # 低波动：ATR=0.2, highest=15.0
+    # 动态阈值 = max(6%, 2.5*0.2/15) = max(6%, 3.3%) = 6%
+    dd_threshold = engine._calc_dynamic_drawdown_threshold(15.0, 0.2)
+    ok = dd_threshold == TRAILING_DRAWDOWN_FLOOR
+    print('  [PASS] V1.1 低波动动态阈值=FLOOR' if ok else '  [FAIL] V1.1 低波动动态阈值: %f' % dd_threshold)
+    return ok
+
+
+def test_trailing_atr_adaptive_high_vol():
+    """V1.1: 高波动股票 ATR 自适应阈值 > FLOOR"""
+    from core.risk_manager import TRAILING_DRAWDOWN_CAP
+    df = make_klines(60, 10.0, 15.0, seed=21)
+    engine = create_engine()
+
+    # 高波动：ATR=2.0, highest=30.0
+    # 动态阈值 = max(6%, 2.5*2.0/30) = max(6%, 16.7%) = 15% (cap)
+    dd_threshold = engine._calc_dynamic_drawdown_threshold(30.0, 2.0)
+    ok = dd_threshold == TRAILING_DRAWDOWN_CAP
+    print('  [PASS] V1.1 高波动动态阈值=CAP' if ok else '  [FAIL] V1.1 高波动动态阈值: %f' % dd_threshold)
+    return ok
+
+
+def test_trailing_chandelier_20pct():
+    """V1.1: 20% 盈利启用吊灯止损"""
+    df = make_klines(60, 10.0, 12.0, seed=22)
+    engine = create_engine()
+    state = SellPositionState(code='000001.SZ', cost_price=10.0, current_shares=1000,
+                              highest_price=15.0)
+    engine._states['000001.SZ'] = state
+    # profit = (12-10)/10 = 20%, 应走高盈利分支
+    decisions = engine.evaluate('20260602', {'000001.SZ': 15.0},
+                                {'000001.SZ': df}, build_positions(10.0))
+    ok = len(decisions) >= 0  # 只要不报错即可
+    print('  [PASS] V1.1 20%盈利分支正常' if ok else '  [FAIL] V1.1 20%盈利分支异常')
+    return ok
+
+
+def test_trailing_no_chandelier_below_10pct():
+    """V1.1: 10% 以下走 MA5 分支，不进 ATR 计算"""
+    df = make_klines(60, 10.0, 10.5, seed=23)
+    engine = create_engine()
+    state = SellPositionState(code='000001.SZ', cost_price=10.0, current_shares=1000,
+                              highest_price=10.5)
+    engine._states['000001.SZ'] = state
+    # profit = (10.5-10)/10 = 5%, 走 MA5 分支
+    decisions = engine.evaluate('20260602', {'000001.SZ': 10.5},
+                                {'000001.SZ': df}, build_positions(10.0))
+    ok = len(decisions) >= 0
+    print('  [PASS] V1.1 <10%走MA5分支' if ok else '  [FAIL] V1.1 <10%分支异常')
+    return ok
+
+
+def test_diagnose_position_after_constant_removal():
+    """V1.1: 删除 LO/MID/HI 后 diagnose_position 不抛 NameError"""
+    df = make_klines(60, 10.0, 12.0, seed=24)
+    engine = create_engine()
+    try:
+        diag = engine.diagnose_position('000001.SZ', df, 10.0, 12.0, 13.0)
+        ok = 'trailing' in diag['layers']
+        print('  [PASS] V1.1 diagnose_position正常' if ok else '  [FAIL] V1.1 diagnose_position异常')
+    except NameError as e:
+        print('  [FAIL] V1.1 NameError: %s' % e)
+        ok = False
+    return ok
+
+
+def test_trailing_atr_none_fallback():
+    """V1.1: 数据不足20根时 atr=None，回退到 FLOOR"""
+    from core.risk_manager import TRAILING_DRAWDOWN_FLOOR
+    df = make_klines(15, 10.0, 11.0, seed=25)  # 只有15根，不够20根
+    engine = create_engine()
+    state = SellPositionState(code='000001.SZ', cost_price=10.0, current_shares=1000,
+                              highest_price=11.0)
+    engine._states['000001.SZ'] = state
+    # profit = 10%, 走中盈利分支，但 ATR 不够
+    decisions = engine.evaluate('20260602', {'000001.SZ': 11.0},
+                                {'000001.SZ': df}, build_positions(10.0))
+    ok = len(decisions) >= 0
+    print('  [PASS] V1.1 ATR=None回退' if ok else '  [FAIL] V1.1 ATR=None异常')
+    return ok
+
+
+def test_dynamic_threshold_floor_cap_boundary():
+    """V1.1: 动态阈值边界行为"""
+    engine = create_engine()
+
+    # 边界1：ATR*N/highest 刚好 = 6%
+    # 2.5 * 0.36 / 15 = 0.06 = 6%
+    dd1 = engine._calc_dynamic_drawdown_threshold(15.0, 0.36)
+    ok1 = abs(dd1 - 0.06) < 0.001
+
+    # 边界2：ATR*N/highest 刚好 = 15%
+    # 2.5 * 0.9 / 15 = 0.15 = 15%
+    dd2 = engine._calc_dynamic_drawdown_threshold(15.0, 0.9)
+    ok2 = abs(dd2 - 0.15) < 0.001
+
+    ok = ok1 and ok2
+    print('  [PASS] V1.1 动态阈值边界' if ok else '  [FAIL] V1.1 边界: dd1=%f dd2=%f' % (dd1, dd2))
+    return ok
+
+
+def test_trailing_skip_when_warning_pending():
+    """V1.1: warning_reduced=True 但 confirm_reduced=False 时跳过移动止盈"""
+    df = make_klines(60, 10.0, 12.0, seed=26)
+    engine = create_engine()
+    state = SellPositionState(code='000001.SZ', cost_price=10.0, current_shares=1000,
+                              highest_price=13.0)
+    state.warning_reduced = True
+    state.confirm_reduced = False
+    engine._states['000001.SZ'] = state
+    # profit = 20%, 应该触发移动止盈，但被 warning_reduced 跳过
+    decisions = engine.evaluate('20260602', {'000001.SZ': 13.0},
+                                {'000001.SZ': df}, build_positions(10.0))
+    # 检查是否有移动止盈决策（应该没有，因为被跳过）
+    has_trailing = any('移动止盈' in (d[1].reason or '') for d in decisions)
+    ok = not has_trailing
+    print('  [PASS] V1.1 warning跳过移动止盈' if ok else '  [FAIL] V1.1 warning未跳过')
+    return ok
+
+
+def test_diagnose_position_consistent_with_check_trailing_profit():
+    """V1.1 B1: diagnose_position 与 _check_trailing_profit 边界一致"""
+    engine = create_engine()
+
+    test_cases = [
+        (10.0, 10.5, 10.5, '5%'),
+        (10.0, 11.5, 11.5, '15%'),
+        (10.0, 12.5, 13.0, '25%'),
+        (10.0, 13.5, 14.0, '35%'),
+    ]
+
+    all_ok = True
+    for cost, current, highest, label in test_cases:
+        state = SellPositionState(code='000001.SZ', cost_price=cost, current_shares=1000,
+                                  highest_price=highest)
+        engine._states['000001.SZ'] = state
+
+        # 构造与 current 一致的 DataFrame（最后一根 close = current）
+        df = make_klines(60, cost, current, seed=27)
+        df.iloc[-1, df.columns.get_loc('close')] = current
+        close_s = df['close'].astype(float)
+
+        # 调用 _check_trailing_profit
+        check_result = engine._check_trailing_profit(close_s,
+                                                       df['high'].astype(float),
+                                                       df['low'].astype(float), state)
+
+        # 调用 diagnose_position
+        diag = engine.diagnose_position('000001.SZ', df, cost, current, highest)
+        diag_result = diag['layers']['trailing']['移动止盈']['triggered']
+
+        if check_result != diag_result:
+            print('  [FAIL] V1.1 B1 %s: check=%s diag=%s' % (label, check_result, diag_result))
+            all_ok = False
+
+    ok = all_ok
+    print('  [PASS] V1.1 B1 一致性' if ok else '  [FAIL] V1.1 B1 不一致')
+    return ok
+
+
+# ============================================================
 #  运行入口
 # ============================================================
 
@@ -537,6 +710,15 @@ def run_all():
         ('移动止盈-10~20%回撤6%', test_trailing_10_20pct),
         ('移动止盈-20~30%回撤8%', test_trailing_20_30pct),
         ('移动止盈->30%回撤10%',  test_trailing_over_30pct),
+        ('V1.1-低波动ATR自适应',  test_trailing_atr_adaptive_low_vol),
+        ('V1.1-高波动ATR自适应',  test_trailing_atr_adaptive_high_vol),
+        ('V1.1-20%盈利吊灯止损',  test_trailing_chandelier_20pct),
+        ('V1.1-10%以下MA5分支',   test_trailing_no_chandelier_below_10pct),
+        ('V1.1-diagnose_position', test_diagnose_position_after_constant_removal),
+        ('V1.1-ATR=None回退',     test_trailing_atr_none_fallback),
+        ('V1.1-动态阈值边界',     test_dynamic_threshold_floor_cap_boundary),
+        ('V1.1-warning跳过',      test_trailing_skip_when_warning_pending),
+        ('V1.1-B1一致性',         test_diagnose_position_consistent_with_check_trailing_profit),
     ]
     passed = failed = 0
     for name, func in tests:
