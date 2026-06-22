@@ -1,6 +1,7 @@
 # QMT 策略全局配置
 strategy:
   name: "DUAL_BAND"
+  capital_base: 100000
   max_hold: 5
   target_ratio: 0.16
   hard_stop_loss: -0.08
