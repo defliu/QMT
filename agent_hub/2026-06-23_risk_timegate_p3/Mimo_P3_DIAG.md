@@ -394,3 +394,101 @@ git log -1 --stat HEAD
 - [ ] 回执在工单 EOF 追加（未插中间）
 - [ ] 未改 core/risk_manager.py / Layer 1 / Layer 2 等无关代码
 ```
+
+---
+
+## 完成回执
+
+**执行时间**: 2026-06-23T11:53:55Z
+**MIMO 模型**: mimo-auto
+
+### TASK-0: 真实时间戳
+```
+2026-06-23T11:53:55Z
+```
+
+### TASK-1: 预检
+```
+ git status (clean)
+ 394a0b9 feat(risk): P3 集合竞价 09:25-09:29:59 预埋硬止损
+```
+
+### TASK-2: 3 处 Edit
+- [x] 2a PREMARKET_HARD_STOP_MODE 切 OFF (line 144)
+- [x] 2b _log_premarket_diagnostic 函数插入 (line 1798 后)
+- [x] 2c _check_pre_market_hard_stop 入口调用 (line 1805 区域)
+
+### TASK-3: 单测追加
+- [x] TestPremarketDiagnostic 类追加
+- [x] 2 个新单测函数
+
+### TASK-4: 验证输出
+**4a P3 单测 (13)**:
+```
+Ran 13 tests in 0.061s
+OK
+```
+
+**4b P1+P2 回归 (24)**:
+```
+Ran 24 tests in 0.015s
+OK
+```
+
+**4c build_strategy**:
+```
+Building strategy_main.py ...
+OK: strategy_main.py (尾盘版, 无MOCK)
+Size: 228544 bytes
+First line: # coding=gbk
+Encoding: GBK (verified by reading with gbk)
+Validating... OK
+Done.
+```
+
+**4d validate_qmt_file**:
+```
+Result: ALL PASS  (6/6)
+```
+
+### TASK-5: git diff --cached + commit
+```
+adapters/qmt_wrapper.py
+agent_hub/2026-06-23_risk_timegate_p3/Mimo_P3_DIAG.md
+strategy_main.py
+tests/test_risk_timegate_p3.py
+```
+```
+commit f409c0f108ac3bc15ee3fdfcec59ef501463ad3a
+Author: Developer <developer@qmt-strategies.local>
+Date:   Tue Jun 23 19:56:47 2026 +0800
+
+    feat(risk): P3 观察期 - 09:25 日K字段诊断 + 临时切 OFF
+    
+    新增（行为变更）:
+    - _log_premarket_diagnostic: 每日 09:25 第一次进 _check_pre_market_hard_stop
+      时同时记录 get_market_data_ex 1d close[-1]/[-2] 和 get_full_tick
+      lastPrice/preClose/open/high/low 到 D:/QMT_POOL/premarket_diag_YYYYMMDD.csv
+    - PREMARKET_HARD_STOP_MODE 默认临时切 'OFF'（观察期，验日K字段后切回 'G3_ONLY'）
+    - 诊断写文件无副作用，异常吞掉只打印
+    
+    13 P3 单测 + 14 P1 + 10 P2 回归全 PASS。validate_qmt_file 6 项 PASS。
+    不动 Layer 1 / Layer 2 / SAFEMODE / DEBUG_MODE / TEST_MODE / core/risk_manager。
+
+ adapters/qmt_wrapper.py                            |  64 +++-
+ .../2026-06-23_risk_timegate_p3/Mimo_P3_DIAG.md    | 396 +++++++++++++++++++++
+ strategy_main.py                                   |  66 +++-
+ tests/test_risk_timegate_p3.py                     |  99 ++++-
+ 4 files changed, 612 insertions(+), 13 deletions(-)
+```
+
+### 自检
+- [x] 时间戳真跑 date 命令
+- [x] staged 只有 4 个文件
+- [x] commit 成功，未 push / amend / --no-verify
+- [x] P3 单测 13 PASS
+- [x] P1+P2 回归 24 PASS
+- [x] validate 6 项 PASS
+- [x] PREMARKET_HARD_STOP_MODE 默认值 = 'OFF'
+- [x] 回执在工单 EOF 追加（未插中间）
+- [x] 未改 core/risk_manager.py / Layer 1 / Layer 2 等无关代码
