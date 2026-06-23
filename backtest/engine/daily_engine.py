@@ -276,6 +276,8 @@ def run_backtest(
     daily_filter_counts = []
     daily_trigger_counts = []
     daily_warnings = []
+    daily_candidate_total = []
+    daily_candidate_passed = []
     unfilled_order_count = 0
 
     pending = None
@@ -364,9 +366,15 @@ def run_backtest(
                 aux_data=aux_for_eval,
             )
             diag = decision.get("diagnostics", {})
-            daily_filter_counts.append(diag.get("filter_counts", {}))
-            daily_trigger_counts.append(diag.get("trigger_counts", {}))
+            # v0.4: 通用 vs 私有字段分别取
             daily_warnings.append(diag.get("warnings", []))
+            daily_candidate_total.append(int(diag.get("candidate_total", 0)))
+            daily_candidate_passed.append(int(diag.get("candidate_passed", 0)))
+            # 6+2 私有字段走 strategy_specific.{name}.* 路径
+            from backtest.strategies import get_strategy_diag as _gsd
+            _sname = "production/ima_uptrend_v31"
+            daily_filter_counts.append(_gsd(decision, _sname, "filter_counts", {}) or {})
+            daily_trigger_counts.append(_gsd(decision, _sname, "trigger_counts", {}) or {})
             for line in decision.get("logs", []):
                 daily_logs.append("[INFO]  " + line)
             pending = decision
@@ -420,11 +428,23 @@ def run_backtest(
                 benchmark_note = u"benchmark 起点价格为 0，禁用 IR/excess"
 
     # ----- Aggregate diagnostics -----
+    # v0.4: 聚合按 SPEC §3.3 分通用 / 策略私有
+    _n_days = max(1, n_days)
+    _ct_avg = sum(daily_candidate_total)  / float(_n_days)
+    _cp_avg = sum(daily_candidate_passed) / float(_n_days)
     diagnostics_aggregate = {
-        "trigger_counts_total":      _sum_trigger_counts(daily_trigger_counts),
-        "filter_counts_avg_per_day": _avg_filter_counts(daily_filter_counts, n_days),
-        "unfilled_order_count":      unfilled_order_count,
-        "warnings_unique":           _unique_warnings(daily_warnings),
+        # 通用
+        "warnings_unique":             _unique_warnings(daily_warnings),
+        "candidate_total_avg_per_day":  _ct_avg,
+        "candidate_passed_avg_per_day": _cp_avg,
+        "unfilled_order_count":         int(unfilled_order_count),
+        # 策略私有
+        "strategy_specific": {
+            "ima_uptrend_v31": {
+                "filter_counts_avg_per_day": _avg_filter_counts(daily_filter_counts, n_days),
+                "trigger_counts_total":      _sum_trigger_counts(daily_trigger_counts),
+            },
+        },
     }
 
     # ----- Performance -----

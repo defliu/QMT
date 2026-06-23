@@ -79,30 +79,38 @@ def make_decision(
         "target_positions":   [],
         "blocked_candidates": [],
         "diagnostics": {
-            "scores": {},
-            "filter_counts": {
-                "blocked_min_score":            0,
-                "blocked_min_core":             0,
-                "blocked_max_bias5":            0,
-                "blocked_max_daily_pct":        0,
-                "blocked_already_held":         0,
-                "blocked_limit_up":             0,
-                "blocked_suspended":            0,
-                "blocked_insufficient_history": 0,
-                "candidate_total":              0,
-                "candidate_passed":             0,
-            },
+            # —— 通用字段 —— (SPEC v0.4 §3.3)
             "warnings": list((aux_data or {}).get("warnings", []) or []),
-            "trigger_counts": {
-                "early_stop": 0, "early_kick": 0, "stop_loss": 0,
-                "score_drop": 0, "replace":    0, "warning":    0, "confirm": 0,
+            "candidate_total":  0,
+            "candidate_passed": 0,
+            # —— 策略私有字段 ——
+            "strategy_specific": {
+                "ima_uptrend_v31": {
+                    "scores": {},
+                    "filter_counts": {
+                        "blocked_min_score":            0,
+                        "blocked_min_core":             0,
+                        "blocked_max_bias5":            0,
+                        "blocked_max_daily_pct":        0,
+                        "blocked_already_held":         0,
+                        "blocked_limit_up":             0,
+                        "blocked_suspended":            0,
+                        "blocked_insufficient_history": 0,
+                    },
+                    "trigger_counts": {
+                        "early_stop": 0, "early_kick": 0, "stop_loss": 0,
+                        "score_drop": 0, "replace":    0, "warning":    0, "confirm": 0,
+                    },
+                },
             },
         },
         "logs": [],
     }
 
-    fc = decision["diagnostics"]["filter_counts"]
-    tc = decision["diagnostics"]["trigger_counts"]
+    _ss   = decision["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]
+    fc    = _ss["filter_counts"]
+    tc    = _ss["trigger_counts"]
+    _scores = _ss["scores"]
 
     # Index score records by code.
     scores_by_code = {}
@@ -111,7 +119,7 @@ def make_decision(
 
     # 03 section 6 constraint 5: scores covers ALL scored codes.
     for code, rec in scores_by_code.items():
-        decision["diagnostics"]["scores"][code] = dict(rec)
+        _scores[code] = dict(rec)
 
     held_codes = set()
     for p in (positions or []):
@@ -138,8 +146,8 @@ def make_decision(
                 "priority":        prio,
                 "diagnostics_ref": code if score_rec is not None else "",
             }
-            if code in decision["diagnostics"]["scores"]:
-                decision["diagnostics"]["scores"][code]["signal"] = "sell"
+            if code in _scores:
+                _scores[code]["signal"] = "sell"
 
     # ===== 2. Buy candidate filter chain =====
     min_score = float(strategy_config.get("min_score", 60.0))
@@ -148,7 +156,7 @@ def make_decision(
     max_daily = float(strategy_config.get("max_daily_pct", 9.0))
 
     universe_list = list(universe or [])
-    fc["candidate_total"] = len(universe_list)
+    decision["diagnostics"]["candidate_total"] = len(universe_list)
 
     candidate_records = []
     for code in universe_list:
@@ -233,7 +241,7 @@ def make_decision(
             continue
         candidate_records.append(score_rec)
 
-    fc["candidate_passed"] = len(candidate_records)
+    decision["diagnostics"]["candidate_passed"] = len(candidate_records)
 
     # ===== 3. Sort candidates by score_total desc =====
     candidate_records.sort(key=lambda r: float(r["score_total"]), reverse=True)
@@ -278,8 +286,8 @@ def make_decision(
                         "diagnostics_ref": w_code if w_code in scores_by_code else "",
                     }
                     tc["replace"] += 1
-                    if w_code in decision["diagnostics"]["scores"]:
-                        decision["diagnostics"]["scores"][w_code]["signal"] = "sell"
+                    if w_code in _scores:
+                        _scores[w_code]["signal"] = "sell"
                 buy_records.append((cand, "replace_target"))
 
     # ===== 5. Assemble buy_candidates =====
@@ -302,8 +310,8 @@ def make_decision(
                 "target_volume": 0,            # OQ-F
                 "reason":        reason,
             })
-            if rec["code"] in decision["diagnostics"]["scores"]:
-                decision["diagnostics"]["scores"][rec["code"]]["signal"] = "buy"
+            if rec["code"] in _scores:
+                _scores[rec["code"]]["signal"] = "buy"
 
     # ===== 6. Sell decisions ordered by priority =====
     sells = list(sell_by_code.values())
@@ -313,7 +321,8 @@ def make_decision(
     # ===== 7. Log a one-liner per call =====
     decision["logs"].append(
         "evaluate_day %s candidates=%d passed=%d sell=%d buy=%d"
-        % (current_date, fc["candidate_total"], fc["candidate_passed"],
+        % (current_date, decision["diagnostics"]["candidate_total"],
+           decision["diagnostics"]["candidate_passed"],
            len(sells), len(decision["buy_candidates"]))
     )
 

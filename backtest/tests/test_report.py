@@ -73,12 +73,18 @@ def _build_result(run_id="20260614_010101_aaaaaa", short_sample=True,
         "portfolio_end": {"total_asset": 1_050_000.0, "cash": 100000.0,
                           "market_value": 950000.0, "n_positions": 1},
         "diagnostics_aggregate": {
-            "trigger_counts_total": {"early_stop": 0, "early_kick": 0,
-                                     "stop_loss": 1, "score_drop": 0,
-                                     "replace": 0, "warning": 0, "confirm": 0},
-            "filter_counts_avg_per_day": {"blocked_min_score": 1.0},
-            "unfilled_order_count": 0,
             "warnings_unique": [],
+            "candidate_total_avg_per_day": 2.0,
+            "candidate_passed_avg_per_day": 1.5,
+            "unfilled_order_count": 0,
+            "strategy_specific": {
+                "ima_uptrend_v31": {
+                    "filter_counts_avg_per_day": {"blocked_min_score": 1.0},
+                    "trigger_counts_total": {"early_stop": 0, "early_kick": 0,
+                                             "stop_loss": 1, "score_drop": 0,
+                                             "replace": 0, "warning": 0, "confirm": 0},
+                },
+            },
         },
     }
 

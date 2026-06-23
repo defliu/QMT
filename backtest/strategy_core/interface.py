@@ -21,41 +21,39 @@ from backtest.strategies.production.ima_uptrend_v31.strategy import (
 
 
 def make_empty_decision():
-    """v0.4 schema 的空 decision。
-
-    通用字段提升到 diagnostics 顶层（warnings / candidate_total / candidate_passed）；
-    6+2 私有字段下沉到 diagnostics.strategy_specific.ima_uptrend_v31.* —— 但
-    Milestone A 阶段为保证 sha256 一致性，先沿用 v0.3 扁平 schema，Milestone B
-    再做 namespace 化（按里程碑节奏，本步暂不动 diagnostics 内部布局）。
-    """
+    """v0.4 空 decision schema —— SPEC §3.3：通用字段提顶 + 私有字段 namespace 化。"""
     return {
         "sell_decisions":      [],
         "buy_candidates":      [],
         "target_positions":    [],
         "blocked_candidates":  [],
         "diagnostics": {
-            "scores": {},
-            "filter_counts": {
-                "blocked_min_score":            0,
-                "blocked_min_core":             0,
-                "blocked_max_bias5":            0,
-                "blocked_max_daily_pct":        0,
-                "blocked_already_held":         0,
-                "blocked_limit_up":             0,
-                "blocked_suspended":            0,
-                "blocked_insufficient_history": 0,
-                "candidate_total":              0,
-                "candidate_passed":             0,
-            },
-            "warnings": [],
-            "trigger_counts": {
-                "early_stop":  0,
-                "early_kick":  0,
-                "stop_loss":   0,
-                "score_drop":  0,
-                "replace":     0,
-                "warning":     0,
-                "confirm":     0,
+            "warnings":         [],
+            "candidate_total":  0,
+            "candidate_passed": 0,
+            "strategy_specific": {
+                "ima_uptrend_v31": {
+                    "scores": {},
+                    "filter_counts": {
+                        "blocked_min_score":            0,
+                        "blocked_min_core":             0,
+                        "blocked_max_bias5":            0,
+                        "blocked_max_daily_pct":        0,
+                        "blocked_already_held":         0,
+                        "blocked_limit_up":             0,
+                        "blocked_suspended":            0,
+                        "blocked_insufficient_history": 0,
+                    },
+                    "trigger_counts": {
+                        "early_stop":  0,
+                        "early_kick":  0,
+                        "stop_loss":   0,
+                        "score_drop":  0,
+                        "replace":     0,
+                        "warning":     0,
+                        "confirm":     0,
+                    },
+                },
             },
         },
         "logs": [],

@@ -33,5 +33,18 @@ def list_strategies():
     return sorted(_REGISTRY.keys())
 
 
+def get_strategy_diag(decision, strategy_name, key, default=None):
+    """v0.4 取数辅助：从 decision.diagnostics.strategy_specific.{strategy_name}.{key} 取值。
+
+    strategy_name 形如 'production/ima_uptrend_v31'，内部用最后一段作为 namespace key。
+    SPEC: specs/SPEC_BACKTEST_FACTORY_V0.4_GENERALIZATION_PHASE1.md §3.3
+    """
+    short = strategy_name.split("/")[-1] if strategy_name else ""
+    return (decision.get("diagnostics", {})
+                    .get("strategy_specific", {})
+                    .get(short, {})
+                    .get(key, default))
+
+
 # 触发注册：import 子包即可
 from backtest.strategies.production import ima_uptrend_v31  # noqa: F401

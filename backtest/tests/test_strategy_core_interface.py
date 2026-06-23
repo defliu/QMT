@@ -23,22 +23,35 @@ def test_make_empty_decision_keys():
     for k in ["sell_decisions", "buy_candidates", "target_positions",
               "blocked_candidates", "diagnostics", "logs"]:
         assert k in d
-    # 03 section 6: diagnostics has 4 sub-keys
-    for k in ["scores", "filter_counts", "warnings", "trigger_counts"]:
-        assert k in d["diagnostics"]
-    # filter_counts: 8 blocked + 2 candidate counters, all zero
-    fc = d["diagnostics"]["filter_counts"]
-    for k in ["blocked_min_score", "blocked_min_core", "blocked_max_bias5",
-              "blocked_max_daily_pct", "blocked_already_held",
-              "blocked_limit_up", "blocked_suspended",
-              "blocked_insufficient_history",
-              "candidate_total", "candidate_passed"]:
-        assert k in fc and fc[k] == 0
-    # trigger_counts: 7 reasons, all zero
-    tc = d["diagnostics"]["trigger_counts"]
-    for k in ["early_stop", "early_kick", "stop_loss", "score_drop",
-              "replace", "warning", "confirm"]:
-        assert k in tc and tc[k] == 0
+    diag = d["diagnostics"]
+    # 通用字段
+    assert set(diag.keys()) == {"warnings", "candidate_total", "candidate_passed",
+                                "strategy_specific"}
+    assert diag["warnings"] == []
+    assert diag["candidate_total"]  == 0
+    assert diag["candidate_passed"] == 0
+
+    # 策略私有字段
+    ss = diag["strategy_specific"]
+    assert set(ss.keys()) == {"ima_uptrend_v31"}
+    ima = ss["ima_uptrend_v31"]
+    assert set(ima.keys()) == {"scores", "filter_counts", "trigger_counts"}
+    assert ima["scores"] == {}
+    fc = ima["filter_counts"]
+    assert set(fc.keys()) == {
+        "blocked_min_score", "blocked_min_core", "blocked_max_bias5",
+        "blocked_max_daily_pct", "blocked_already_held", "blocked_limit_up",
+        "blocked_suspended", "blocked_insufficient_history",
+    }
+    for v in fc.values():
+        assert v == 0
+    tc = ima["trigger_counts"]
+    assert set(tc.keys()) == {
+        "early_stop", "early_kick", "stop_loss", "score_drop",
+        "replace", "warning", "confirm",
+    }
+    for v in tc.values():
+        assert v == 0
 
 
 def test_evaluate_day_returns_empty_decision_skeleton():

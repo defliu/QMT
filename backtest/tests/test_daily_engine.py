@@ -2,7 +2,7 @@
 """Integration tests for daily_engine.run_backtest.
 
 Uses a FakeReader (in-memory pandas frames) to exercise the full pipeline
-without requiring the F:\\金策智算 DuckDB. A separate test exercises the
+without requiring the E:\\金策智算 DuckDB. A separate test exercises the
 real sample DB (which has only 30 days, so strategy_core blocks all
 candidates due to insufficient_history -- good for verifying empty-trade
 plumbing).
@@ -248,9 +248,18 @@ def test_diagnostics_aggregate_keys():
         initial_cash=1_000_000.0, universe_hash="u", config_hash="c",
     )
     da = result["summary"]["diagnostics_aggregate"]
-    assert set(da.keys()) == {"trigger_counts_total", "filter_counts_avg_per_day",
-                              "unfilled_order_count", "warnings_unique"}
+    assert set(da.keys()) == {
+        "warnings_unique",
+        "candidate_total_avg_per_day", "candidate_passed_avg_per_day",
+        "unfilled_order_count",
+        "strategy_specific",
+    }
     assert da["unfilled_order_count"] >= 0
+    ss = da["strategy_specific"]
+    assert set(ss.keys()) == {"ima_uptrend_v31"}
+    assert set(ss["ima_uptrend_v31"].keys()) == {
+        "filter_counts_avg_per_day", "trigger_counts_total",
+    }
 
 
 def test_no_io_writes_to_workspace(tmp_path, monkeypatch):

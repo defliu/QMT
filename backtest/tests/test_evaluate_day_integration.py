@@ -65,7 +65,7 @@ def test_evaluate_day_returns_full_decision_shape():
     )
     expected = make_empty_decision()
     assert set(d.keys()) == set(expected.keys())
-    assert set(d["diagnostics"].keys()) == set(expected["diagnostics"].keys())
+    assert set(d["diagnostics"].keys()) == {"warnings", "candidate_total", "candidate_passed", "strategy_specific"}
 
 
 def test_empty_universe_empty_market_runs_clean():
@@ -73,7 +73,7 @@ def test_empty_universe_empty_market_runs_clean():
     assert d["sell_decisions"] == []
     assert d["buy_candidates"] == []
     assert d["blocked_candidates"] == []
-    assert d["diagnostics"]["filter_counts"]["candidate_total"] == 0
+    assert d["diagnostics"]["candidate_total"] == 0
 
 
 # ---------- end-to-end basic ----------
@@ -82,10 +82,10 @@ def test_evaluate_day_picks_top_candidate():
     d = evaluate_day("2025-09-30", mw, [], 1e6, ["A","B"],
                      _account(), _cfg(), _aux())
     # diagnostics.scores must contain both
-    assert "A" in d["diagnostics"]["scores"]
-    assert "B" in d["diagnostics"]["scores"]
+    assert "A" in d["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["scores"]
+    assert "B" in d["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["scores"]
     # candidate_total = 2
-    assert d["diagnostics"]["filter_counts"]["candidate_total"] == 2
+    assert d["diagnostics"]["candidate_total"] == 2
 
 
 def test_evaluate_day_logs_present():
@@ -113,7 +113,7 @@ def test_evaluate_day_is_deterministic():
                       _account(), _cfg(), _aux())
     # buy_candidates ordering / scores must be byte-identical (modulo float repr)
     assert [b["code"] for b in d1["buy_candidates"]] == [b["code"] for b in d2["buy_candidates"]]
-    assert d1["diagnostics"]["filter_counts"] == d2["diagnostics"]["filter_counts"]
+    assert d1["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["filter_counts"] == d2["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["filter_counts"]
 
 
 def test_evaluate_day_no_input_mutation():
@@ -145,7 +145,7 @@ def test_sell_stop_loss_then_buy_other():
     assert "P" in sell_codes
     assert enums.SELL_REASON_STOP_LOSS in sell_reasons
     # trigger count
-    assert d["diagnostics"]["trigger_counts"]["stop_loss"] >= 1
+    assert d["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["trigger_counts"]["stop_loss"] >= 1
 
 
 def test_sector_heat_mode_static_raises():

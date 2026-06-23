@@ -140,7 +140,7 @@ def test_blocked_already_held():
             "unrealized_pnl": 50}]
     d = make_decision("2025-09-30", mw, pos, 0.0, ["A"], _account(), _cfg(),
                       _aux(), [_score_rec("A", total=80.0)])
-    assert d["diagnostics"]["filter_counts"]["blocked_already_held"] == 1
+    assert d["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["filter_counts"]["blocked_already_held"] == 1
     assert any(b["blocked_by"] == enums.BLOCKED_ALREADY_HELD
                for b in d["blocked_candidates"])
 
@@ -149,22 +149,22 @@ def test_blocked_min_score():
     mw = {"A": _mw_row("A", 10.5, 10.4)}
     d = make_decision("2025-09-30", mw, [], 1e6, ["A"], _account(), _cfg(),
                       _aux(), [_score_rec("A", total=55.0)])
-    assert d["diagnostics"]["filter_counts"]["blocked_min_score"] == 1
-    assert d["diagnostics"]["filter_counts"]["candidate_passed"] == 0
+    assert d["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["filter_counts"]["blocked_min_score"] == 1
+    assert d["diagnostics"]["candidate_passed"] == 0
 
 
 def test_blocked_limit_up():
     mw = {"A": _mw_row("A", 11.05, 10.0)}
     d = make_decision("2025-09-30", mw, [], 1e6, ["A"], _account(), _cfg(),
                       _aux(), [_score_rec("A", total=80.0)])
-    assert d["diagnostics"]["filter_counts"]["blocked_limit_up"] == 1
+    assert d["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["filter_counts"]["blocked_limit_up"] == 1
 
 
 def test_blocked_max_bias5():
     mw = {"A": _mw_row("A", 10.1, 10.0)}
     d = make_decision("2025-09-30", mw, [], 1e6, ["A"], _account(), _cfg(),
                       _aux(), [_score_rec("A", total=80.0, bias5=15.0)])
-    assert d["diagnostics"]["filter_counts"]["blocked_max_bias5"] == 1
+    assert d["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["filter_counts"]["blocked_max_bias5"] == 1
 
 
 def test_blocked_min_core():
@@ -173,14 +173,14 @@ def test_blocked_min_core():
                      macd=1, val=1)
     d = make_decision("2025-09-30", mw, [], 1e6, ["A"], _account(), _cfg(),
                       _aux(), [rec])
-    assert d["diagnostics"]["filter_counts"]["blocked_min_core"] == 1
+    assert d["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["filter_counts"]["blocked_min_core"] == 1
 
 
 def test_blocked_max_daily_pct():
     mw = {"A": _mw_row("A", 10.95, 10.0)}
     d = make_decision("2025-09-30", mw, [], 1e6, ["A"], _account(), _cfg(),
                       _aux(), [_score_rec("A", total=80.0)])
-    assert d["diagnostics"]["filter_counts"]["blocked_max_daily_pct"] == 1
+    assert d["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["filter_counts"]["blocked_max_daily_pct"] == 1
 
 
 def test_blocked_suspended_no_data_today():
@@ -189,7 +189,7 @@ def test_blocked_suspended_no_data_today():
     mw = {"A": df}
     d = make_decision("2025-09-30", mw, [], 1e6, ["A"], _account(), _cfg(),
                       _aux(), [_score_rec("A", total=80.0)])
-    assert d["diagnostics"]["filter_counts"]["blocked_suspended"] == 1
+    assert d["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["filter_counts"]["blocked_suspended"] == 1
 
 
 def test_blocked_insufficient_history():
@@ -197,7 +197,7 @@ def test_blocked_insufficient_history():
     mw = {"A": df}
     d = make_decision("2025-09-30", mw, [], 1e6, ["A"], _account(), _cfg(),
                       _aux(), [])
-    assert d["diagnostics"]["filter_counts"]["blocked_insufficient_history"] == 1
+    assert d["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["filter_counts"]["blocked_insufficient_history"] == 1
 
 
 # ---------- buy / replace ----------
@@ -225,7 +225,7 @@ def test_replace_when_score_gap_15():
     buy_codes = [b["code"] for b in d["buy_candidates"]]
     assert enums.SELL_REASON_REPLACE in sell_reasons
     assert "C" in buy_codes
-    assert d["diagnostics"]["trigger_counts"]["replace"] == 1
+    assert d["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["trigger_counts"]["replace"] == 1
 
 
 def test_no_replace_when_gap_below_threshold():
@@ -237,7 +237,7 @@ def test_no_replace_when_gap_below_threshold():
                       _account(max_pos=1), _cfg(),
                       _aux(),
                       [_score_rec("P", total=65.0), _score_rec("C", total=70.0)])
-    assert d["diagnostics"]["trigger_counts"]["replace"] == 0
+    assert d["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["trigger_counts"]["replace"] == 0
 
 
 # ---------- structural ----------
@@ -255,8 +255,8 @@ def test_diagnostics_scores_includes_all_scored():
     d = make_decision("2025-09-30", mw, [], 1e6, ["A", "B"], _account(), _cfg(),
                       _aux(),
                       [_score_rec("A", total=80.0), _score_rec("B", total=50.0)])
-    assert "A" in d["diagnostics"]["scores"]
-    assert "B" in d["diagnostics"]["scores"]
+    assert "A" in d["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["scores"]
+    assert "B" in d["diagnostics"]["strategy_specific"]["ima_uptrend_v31"]["scores"]
 
 
 def test_target_positions_empty_in_v02():
