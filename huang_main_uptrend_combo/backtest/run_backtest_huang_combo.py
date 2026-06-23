@@ -65,16 +65,25 @@ def run_backtest(args):
     result = select_huang_main_uptrend_combo(ohlcv, bench)
     print('       signal rows:', len(result))
 
-    # 5. 信号统计 (v1.2: 既看原 combo_XG 也看 combo_XG_window20)
-    n_combo_orig = int(result['combo_XG'].sum())
-    n_combo_win = int(result['combo_XG_window20'].sum())
-    print('[step] combo_XG (同日 AND) signals:', n_combo_orig)
-    print('[step] combo_XG_window20 (滑动窗口) signals:', n_combo_win)
-    # 以 combo_XG_window20 作为主信号源跑后续评估
-    sig = result[result['combo_XG_window20'] == True].copy()
-    print('[step] using combo_XG_window20 for evaluation:', len(sig),
+    # 5. 信号统计 (SPEC v1.2: combo_XG 已是 box_window_hit AND zhongjun, 不再是同日 AND)
+    sig = result[result['combo_XG'] == True].copy()
+    n_box = int(result['box_breakout_XG'].sum())
+    n_zj = int(result['double_zhongjun_XG'].sum())
+    n_window_hit = int(result['box_window_hit'].sum())
+    n_combo = len(sig)
+    print('[step] box_breakout_XG signals:', n_box)
+    print('[step] double_zhongjun_XG signals:', n_zj)
+    print('[step] box_window_hit (any day in last 120 trading days):', n_window_hit)
+    print('[step] combo_XG (window_hit AND zhongjun):', n_combo,
           '(across', sig['code'].nunique() if len(sig) else 0, 'stocks,',
           sig['date'].nunique() if len(sig) else 0, 'trading days)')
+
+    # 信号间隔分布 (SPEC v1.2 §E 第 3 条)
+    if len(sig):
+        gaps = sig['box_days_since_last_signal'].dropna()
+        if len(gaps):
+            print('[step] box→zhongjun 间隔天数: min=%.0f median=%.0f mean=%.1f max=%.0f' %
+                  (gaps.min(), gaps.median(), gaps.mean(), gaps.max()))
 
     hold_periods = [int(x) for x in args.hold_periods.split(',')]
     eval_rows = []
@@ -190,9 +199,11 @@ def run_backtest(args):
         'benchmark': args.benchmark,
         'benchmark_rows': len(bench),
         'total_trading_days': len(bench),
-        'combo_XG_orig_signals': n_combo_orig,
-        'combo_XG_window20_signals': n_combo_win,
-        'signal_source': 'combo_XG_window20',
+        'spec_version': 'v1.2',
+        'box_window_N': 120,
+        'box_breakout_signals': n_box,
+        'double_zhongjun_signals': n_zj,
+        'box_window_hit_signals': n_window_hit,
         'signal_rows': int(len(sig)),
         'signal_unique_stocks': int(sig['code'].nunique()) if len(sig) else 0,
         'signal_unique_days': int(sig['date'].nunique()) if len(sig) else 0,

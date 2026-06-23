@@ -4,7 +4,7 @@
 SPEC: D:/QMT_STRATEGIES/specs/SPEC_HUANG_MAIN_UPTREND_TDX_TO_QMT.md
 原始公式: F:/天翼云盘同步盘/Obsidian/量化知识库/20_策略知识库/黄氏主升浪策略.txt
 
-最终唯一输出: combo_XG = box_breakout_XG AND double_zhongjun_XG
+最终唯一输出: combo_XG = box_window_hit AND double_zhongjun_XG (SPEC v1.2 §C)
 
 离线纯 Python 模块, 不进 build_strategy.py, 不接 QMT 实盘下单接口.
 Python 3.6.8 兼容: 禁 dict[str,...] / str | None / walrus / match-case / dataclass.
@@ -40,8 +40,8 @@ DEFAULT_PARAMS = {
     'zj_ma60_up_n': 5,
     # 大盘指数
     'benchmark_code': '000001.SH',
-    # 组合串联窗口 (v1.2: SPEC §C 同日 AND 互斥, 改滑动窗口)
-    'combo_window_N': 20,
+    # SPEC v1.2 §C: 时间窗口串联 (废弃同日 AND)
+    'box_window_N': 120,  # 最近 N 个交易日内曾触发 box_breakout_XG; 默认 120 (诚哥拍板)
 }
 
 
@@ -261,7 +261,7 @@ def select_huang_main_uptrend_combo(data, index_data, params=None):
           code, date,
           box_* 中间字段 + box_breakout_XG,
           double_* 中间字段 + double_zhongjun_XG,
-          combo_XG (= box_breakout_XG AND double_zhongjun_XG)
+          combo_XG (= box_window_hit AND double_zhongjun_XG, SPEC v1.2 §C)
     """
     p = dict(DEFAULT_PARAMS)
     if params:
@@ -278,12 +278,28 @@ def select_huang_main_uptrend_combo(data, index_data, params=None):
         box = _calc_box_breakout_conditions(df, p)
         dbl = _calc_double_zhongjun_conditions(df, index_data, p)
         merged = _pd.concat([box, dbl], axis=1)
-        merged['combo_XG'] = merged['box_breakout_XG'] & merged['double_zhongjun_XG']
-        # v1.2 滑动窗口串联: 当日 zhongjun=True 且近 N 日内任一日 box_breakout=True
-        # 解决 SPEC v1.1 同日 AND 互斥问题 (箱体黏连 vs 多头排列发散互斥)
-        win_N = p['combo_window_N']
-        box_in_window = merged['box_breakout_XG'].rolling(window=win_N, min_periods=1).max().astype(bool)
-        merged['combo_XG_window20'] = merged['double_zhongjun_XG'] & box_in_window
+
+        # SPEC v1.2 §C: 时间窗口串联
+        # 1) box_window_hit: 最近 N 个交易日内曾触发 box_breakout_XG
+        # 2) box_last_signal_date: 最近一次 box_breakout_XG=True 的日期
+        # 3) box_days_since_last_signal: 距上次 box 信号的天数
+        # 4) combo_XG = box_window_hit AND 今日 double_zhongjun_XG
+        win_N = p['box_window_N']
+        box_xg = merged['box_breakout_XG'].astype(bool)
+        # rolling.max 在 bool->int 上等价 "窗口内任一日 True"
+        # min_periods=1 让窗口起步阶段也能产出 (前 N-1 日可视为更短窗口)
+        merged['box_window_hit'] = box_xg.rolling(window=win_N, min_periods=1).max().astype(bool)
+
+        # box_last_signal_date / box_days_since_last_signal: 用累计前向最近 True 计算
+        date_series = _pd.Series(df.index, index=df.index)
+        # 在 box=True 的位置记下日期, 其它位置 NaT, 再 ffill
+        box_last = date_series.where(box_xg, other=_pd.NaT).ffill()
+        merged['box_last_signal_date'] = box_last
+        days_since = (date_series - box_last).dt.days
+        merged['box_days_since_last_signal'] = days_since
+
+        merged['combo_XG'] = merged['box_window_hit'] & merged['double_zhongjun_XG']
+
         merged.insert(0, 'date', df.index)
         merged.insert(0, 'code', code)
         results.append(merged)
