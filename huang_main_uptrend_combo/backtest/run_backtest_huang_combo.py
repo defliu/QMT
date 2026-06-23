@@ -65,9 +65,16 @@ def run_backtest(args):
     result = select_huang_main_uptrend_combo(ohlcv, bench)
     print('       signal rows:', len(result))
 
-    sig = result[result['combo_XG'] == True].copy()
-    print('[step] combo_XG=True signals:', len(sig), '(across', sig['code'].nunique(), 'stocks,',
-          sig['date'].nunique(), 'trading days)')
+    # 5. 信号统计 (v1.2: 既看原 combo_XG 也看 combo_XG_window20)
+    n_combo_orig = int(result['combo_XG'].sum())
+    n_combo_win = int(result['combo_XG_window20'].sum())
+    print('[step] combo_XG (同日 AND) signals:', n_combo_orig)
+    print('[step] combo_XG_window20 (滑动窗口) signals:', n_combo_win)
+    # 以 combo_XG_window20 作为主信号源跑后续评估
+    sig = result[result['combo_XG_window20'] == True].copy()
+    print('[step] using combo_XG_window20 for evaluation:', len(sig),
+          '(across', sig['code'].nunique() if len(sig) else 0, 'stocks,',
+          sig['date'].nunique() if len(sig) else 0, 'trading days)')
 
     hold_periods = [int(x) for x in args.hold_periods.split(',')]
     eval_rows = []
@@ -183,9 +190,12 @@ def run_backtest(args):
         'benchmark': args.benchmark,
         'benchmark_rows': len(bench),
         'total_trading_days': len(bench),
+        'combo_XG_orig_signals': n_combo_orig,
+        'combo_XG_window20_signals': n_combo_win,
+        'signal_source': 'combo_XG_window20',
         'signal_rows': int(len(sig)),
-        'signal_unique_stocks': int(sig['code'].nunique()),
-        'signal_unique_days': int(sig['date'].nunique()),
+        'signal_unique_stocks': int(sig['code'].nunique()) if len(sig) else 0,
+        'signal_unique_days': int(sig['date'].nunique()) if len(sig) else 0,
         'empty_days': len(empty_days),
         'empty_days_pct': 100.0 * len(empty_days) / max(1, len(bench)),
         'stats': stats,

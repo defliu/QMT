@@ -40,6 +40,8 @@ DEFAULT_PARAMS = {
     'zj_ma60_up_n': 5,
     # 大盘指数
     'benchmark_code': '000001.SH',
+    # 组合串联窗口 (v1.2: SPEC §C 同日 AND 互斥, 改滑动窗口)
+    'combo_window_N': 20,
 }
 
 
@@ -277,6 +279,11 @@ def select_huang_main_uptrend_combo(data, index_data, params=None):
         dbl = _calc_double_zhongjun_conditions(df, index_data, p)
         merged = _pd.concat([box, dbl], axis=1)
         merged['combo_XG'] = merged['box_breakout_XG'] & merged['double_zhongjun_XG']
+        # v1.2 滑动窗口串联: 当日 zhongjun=True 且近 N 日内任一日 box_breakout=True
+        # 解决 SPEC v1.1 同日 AND 互斥问题 (箱体黏连 vs 多头排列发散互斥)
+        win_N = p['combo_window_N']
+        box_in_window = merged['box_breakout_XG'].rolling(window=win_N, min_periods=1).max().astype(bool)
+        merged['combo_XG_window20'] = merged['double_zhongjun_XG'] & box_in_window
         merged.insert(0, 'date', df.index)
         merged.insert(0, 'code', code)
         results.append(merged)

@@ -44,6 +44,13 @@ class TestHuiceLoader(unittest.TestCase):
         self.assertEqual(len(bench.columns), 1)
         self.assertGreater(len(bench), 0)
 
+    def test_load_benchmark_3year_coverage(self):
+        """Part 4: 验证从 huicexitong 板块指数能读出 3 年完整数据 (修复前 benchmark_index.duckdb 只覆盖 2025-01 起)"""
+        df = load_benchmark_index('000001.SH', '2023-06-01', '2024-12-31')
+        self.assertGreater(len(df), 300, '应有至少 300 行 (2023-06~2024-12 约 365 交易日)')
+        self.assertLess(df.index.min().date().isoformat(), '2023-06-30')
+        self.assertGreater(df.index.max().date().isoformat(), '2024-12-01')
+
     def test_no_lookahead_ordering(self):
         ohlcv = load_ohlcv_from_huicexitong(['600000.SH'], '2025-01-01', '2025-03-31')
         df = ohlcv['600000.SH']

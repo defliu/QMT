@@ -294,6 +294,72 @@ class TestComboXG(unittest.TestCase):
         self.assertTrue(merged.iloc[-1]['combo_XG'])
 
 
+
+class TestComboWindowXG(unittest.TestCase):
+    """v1.2 滑动窗口串联 combo_XG_window20"""
+
+    def test_window_signal_box_then_zhongjun(self):
+        """构造: 第 30 日 box True, 第 40 日 zhongjun True
+        预期: 第 40 日 combo_XG_window20=True (窗口内有 box)
+        """
+        import pandas as pd
+        import numpy as np
+        # 直接用 DataFrame 模拟两个 XG, 不跑 selector (单元粒度)
+        n = 100
+        dates = pd.date_range('2026-01-01', periods=n)
+        box_xg = pd.Series([False] * n, index=dates)
+        zj_xg = pd.Series([False] * n, index=dates)
+        box_xg.iloc[30] = True
+        zj_xg.iloc[40] = True
+
+        # 滑动窗口 20
+        win_N = 20
+        box_in_window = box_xg.rolling(window=win_N, min_periods=1).max().astype(bool)
+        combo = zj_xg & box_in_window
+
+        # 第 40 日 (距 box 10 天, 在 20 日窗口内) 应触发
+        self.assertTrue(combo.iloc[40])
+        # 第 30 日单独 box, 无 zj -> False
+        self.assertFalse(combo.iloc[30])
+
+    def test_window_signal_box_too_old(self):
+        """box 在第 10 日, zhongjun 在第 40 日, 距离 30 天超出 20 日窗口 -> False"""
+        import pandas as pd
+        n = 100
+        dates = pd.date_range('2026-01-01', periods=n)
+        box_xg = pd.Series([False] * n, index=dates)
+        zj_xg = pd.Series([False] * n, index=dates)
+        box_xg.iloc[10] = True
+        zj_xg.iloc[40] = True
+
+        box_in_window = box_xg.rolling(window=20, min_periods=1).max().astype(bool)
+        combo = zj_xg & box_in_window
+        self.assertFalse(combo.iloc[40])
+
+    def test_window_via_select_main_entry(self):
+        """通过 select_huang_main_uptrend_combo 主入口验证: 返回 DataFrame 含 combo_XG_window20 字段"""
+        import pandas as pd
+        import numpy as np
+        from huang_main_uptrend_combo.huang_main_uptrend_combo_selector import (
+            select_huang_main_uptrend_combo,
+        )
+        # 用最小数据 (60+ 日) 跑通主入口, 只验字段存在
+        n = 100
+        dates = pd.date_range('2026-01-01', periods=n)
+        df = pd.DataFrame({
+            'open': [10.0 + i * 0.01 for i in range(n)],
+            'high': [10.1 + i * 0.01 for i in range(n)],
+            'low': [9.9 + i * 0.01 for i in range(n)],
+            'close': [10.0 + i * 0.01 for i in range(n)],
+            'volume': [1000.0] * n,
+        }, index=dates)
+        index_df = pd.DataFrame({'close': [3000.0 + i for i in range(n)]}, index=dates)
+        result = select_huang_main_uptrend_combo({'TEST': df}, index_df)
+        self.assertIn('combo_XG_window20', result.columns)
+        # 短数据下 combo_XG_window20 应全 False (无信号)
+        self.assertEqual(int(result['combo_XG_window20'].sum()), 0)
+
+
 class TestCompletenessEdgeCases(unittest.TestCase):
     """E组: 完整性/边界"""
 

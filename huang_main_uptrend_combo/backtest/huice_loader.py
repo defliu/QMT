@@ -15,7 +15,8 @@ from backtest.data_tools._huicexitong_names import (
 )
 
 HUICE_DB = 'E:/huicexitong/runtime/sj/gpsj.duckdb'
-BENCH_DB = 'F:/backtest_workspace/data/duckdb/benchmark_index.duckdb'
+# BENCH_DB: F:/backtest_workspace/data/duckdb/benchmark_index.duckdb (只覆盖 2025-01 起)
+# Part 4: 改用 huicexitong basic_data."板块指数" (000001.SH 覆盖 2004-01 起)
 
 _C_OPEN  = '\u5f00\u76d8\u4ef7'        # open price
 _C_HIGH  = '\u6700\u9ad8\u4ef7'        # high price
@@ -62,18 +63,31 @@ def load_ohlcv_from_huicexitong(codes, start_date, end_date, db_path=HUICE_DB):
     return result
 
 
-def load_benchmark_index(code, start_date, end_date, db_path=BENCH_DB):
-    """Load benchmark index, return DataFrame(index=date, columns=[close]).
-    Uses benchmark_index.duckdb (BenchmarkIndexReader same file, but this module reads close directly).
+_T_INDEX = '\u677f\u5757\u6307\u6570'  # 板块指数
+_C_INDEX_CLOSE = '\u6536\u76d8\u4ef7'  # 收盘价
+
+
+def load_benchmark_index(code, start_date, end_date, db_path=HUICE_DB):
+    """Read benchmark index, return DataFrame(index=date, columns=[close]).
+
+    Part 4: 改用 huicexitong basic_data."板块指数" 表 (000001.SH 覆盖 2004 起).
+    旧 F:/backtest_workspace/data/duckdb/benchmark_index.duckdb 只覆盖 2025-01 起,
+    用它会让 2023-06~2024-12 段 selector 的 double_大盘_ok 全 False.
     """
     con = duckdb.connect(db_path, read_only=True)
     try:
-        rows = con.execute(
-            'SELECT trade_date, close FROM index_daily '
-            'WHERE code = ? AND trade_date BETWEEN ? AND ? '
-            'ORDER BY trade_date',
-            [code, start_date, end_date]
-        ).fetchall()
+        q = (
+            'SELECT "%s" AS date, "%s" AS close '
+            'FROM basic_data."%s" '
+            'WHERE "%s" = ? AND "%s" BETWEEN ? AND ? '
+            'ORDER BY "%s"'
+        ) % (
+            C_DATE, _C_INDEX_CLOSE,
+            _T_INDEX,
+            C_CODE, C_DATE,
+            C_DATE,
+        )
+        rows = con.execute(q, [code, start_date, end_date]).fetchall()
     finally:
         con.close()
     if not rows:
