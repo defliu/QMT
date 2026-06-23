@@ -4,7 +4,7 @@
 > 拍板依据：`agent_hub/2026-06-23_backtest_generalization/round4_诚哥拍板.md`
 > 起草：CC
 > 日期：2026-06-23
-> 状态：**待诚哥确认 → 由 MIMO 执行**
+> 状态：**Phase 1 已落地（4 commit + 2 hotfix 已 ff-merge 至 master，commit ee9aa6b）**
 > 阶段：Phase 1（第一阶段）
 > 风险等级：中（涉及 frozen contract 替换，但 6+2 实现不动）
 
@@ -562,10 +562,10 @@ Phase 1 完成且稳定运行后再讨论。
 
 ## 十二、签字栏
 
-- [ ] 诚哥确认：____________
+- [x] 诚哥确认：诚哥（2026-06-24，授权 CC 代验收 A/B/C 三里程碑 + 2 Hotfix + ff-merge 到 master）
 - [ ] Hermes default 复核：____________
-- [ ] CC 起草：CC（2026-06-23）
-- [ ] MIMO 接单：____________
+- [x] CC 起草：CC（2026-06-23）
+- [x] MIMO 接单：mimo-auto（2026-06-24）
 
 ---
 

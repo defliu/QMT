@@ -21,7 +21,7 @@ Usage:
 Boundaries (night-shift §四):
   * Reads yaml from D:\\QMT_STRATEGIES\\backtest\\configs\\.
   * Writes leaf yaml + leaf results under F:\\backtest_workspace\\.
-  * Never writes C:/D:; never F:/金策智算/.
+  * Never writes C:/D:; never E:/金策智算/.
   * Does NOT import clean_results (硬约束 #6).
 """
 import argparse
@@ -38,10 +38,13 @@ import yaml
 from backtest import paths
 from backtest.engine import report
 from backtest.engine.hashing import compute_config_hash, compute_universe_hash
-from backtest.data_tools.duckdb_reader import DuckDBDailyReader
+from backtest.data_tools.duckdb_reader import (
+    DuckDBDailyReader, JINCE_ZHISUAN, SUPPORTED_SOURCES,
+)
 from backtest.data_tools.universe import load_universe
 from backtest.engine.daily_engine import run_backtest
 from backtest.scripts import init_workspace
+from backtest.scripts.run_backtest import _load_pit_manifest
 
 log = logging.getLogger("run_batch")
 
@@ -127,16 +130,31 @@ def _run_one_leaf(leaf_cfg, batch_id, leaf_index, leaf_name):
     raw_text = json.dumps(leaf_cfg, sort_keys=True, ensure_ascii=False)
     config_hash = compute_config_hash(raw_text)
 
-    universe_csv = _resolve(universe_cfg.get("csv"))
-    uni = load_universe(universe_csv)
-    universe_hash = compute_universe_hash(uni["codes"])
+    universe_csv = universe_cfg.get("csv")
+    pit_manifest = universe_cfg.get("pit_manifest")
+    if pit_manifest:
+        index_path = _resolve(pit_manifest)
+        universe_by_date, universe_codes = _load_pit_manifest(index_path)
+        if not universe_codes:
+            raise ValueError("PIT manifest produced empty union: %s" % index_path)
+    elif universe_csv:
+        uni = load_universe(_resolve(universe_csv))
+        universe_codes = uni["codes"]
+        universe_by_date = None
+    else:
+        raise ValueError("yaml universe must set either 'csv' or 'pit_manifest'")
+    universe_hash = compute_universe_hash(universe_codes)
 
     db_path = data_cfg.get("path", paths.JINCE_DB_PATH)
-    reader = DuckDBDailyReader(db_path)
+    data_source = data_cfg.get("source", JINCE_ZHISUAN)
+    if data_source not in SUPPORTED_SOURCES:
+        raise ValueError("data.source must be one of %s, got: %s"
+                         % (SUPPORTED_SOURCES, data_source))
+    reader = DuckDBDailyReader(db_path, data_source=data_source)
     try:
         result = run_backtest(
             reader=reader,
-            universe=uni["codes"],
+            universe=universe_codes,
             start_date=bt["start_date"],
             end_date=bt["end_date"],
             strategy_config=strat_cfg,
@@ -144,9 +162,13 @@ def _run_one_leaf(leaf_cfg, batch_id, leaf_index, leaf_name):
             initial_cash=float(bt.get("initial_cash", 1_000_000.0)),
             aux_data=None,
             benchmark_code=bt.get("benchmark_code"),
+            benchmark_db_path=bt.get(
+                "benchmark_db_path",
+                "F:/backtest_workspace/data/duckdb/benchmark_index.duckdb"),
             config_name=config_name,
             config_hash=config_hash,
             universe_hash=universe_hash,
+            universe_by_date=universe_by_date,
             strategy_name=v04_strategy_name,
             trading_model=v04_trading_model,
         )
