@@ -137,6 +137,8 @@ _g_pending_buys = {}
 _g_retry_queue = []
 _g_candidate_queue = []
 _g_strategy_start_ts = None   # 策略启动时间戳（cooling-off 用）
+_g_cooling_printed = False        # P2: cooling-off 首次提示防刷屏
+_g_timegate_skip_printed = set()  # P2: 防刷屏 — 已打印的"时段拦截"事件 (kind, code, key)
 _g_per_stock_amount = 0
 _g_pending_sells = {}
 _g_pending_limitdown_sells = {}  # {code: {info dict}} - limit-down deferred sell queue
@@ -1766,8 +1768,9 @@ def _is_in_cooling_off():
 #  卖出集成
 # ============================================================
 
-def _check_and_execute_sell(C, today):
+def _check_and_execute_sell(C, today, allowed_layers=None):
     global _g_sell_engine, _g_pending_sells, _g_last_sell_fingerprint, _g_sell_skip_printed, _g_failed_printed
+    global _g_timegate_skip_printed
 
     if _g_sell_engine is None:
         return []
@@ -1781,6 +1784,30 @@ def _check_and_execute_sell(C, today):
 
     rt_prices = _get_current_prices(list(_g_my_codes.keys()), C)
     raw_decisions = _g_sell_engine.evaluate(today, _g_my_codes, _g_all_data, positions_data, rt_prices)
+
+    # ===== P2: 时段路由过滤 =====
+    if allowed_layers is not None:
+        layers_set = allowed_layers.get('layers', set())
+        exclude_subs = allowed_layers.get('exclude_sublayers', set())
+        filtered = []
+        for code, dec, shares in raw_decisions:
+            if dec.triggered_layer not in layers_set:
+                skey = ('layer', code, dec.triggered_layer)
+                if skey not in _g_timegate_skip_printed:
+                    _g_timegate_skip_printed.add(skey)
+                    print("  [时段拦截] %s reason=%s layer=%s 不在 %s 允许范围"
+                          % (code, dec.reason, dec.triggered_layer, sorted(layers_set)))
+                continue
+            sub = getattr(dec, 'triggered_sublayer', None)
+            if sub and sub in exclude_subs:
+                skey = ('sublayer', code, sub)
+                if skey not in _g_timegate_skip_printed:
+                    _g_timegate_skip_printed.add(skey)
+                    print("  [时段拦截|sublayer] %s reason=%s sublayer=%s 在 %s 排除列表"
+                          % (code, dec.reason, sub, sorted(exclude_subs)))
+                continue
+            filtered.append((code, dec, shares))
+        raw_decisions = filtered
 
     # 防刷屏：卖出决策变化时才打印诊断表
     if raw_decisions:
@@ -2968,6 +2995,7 @@ class StrategyRunner(object):
         global _g_pending_buys, _g_retry_queue, _g_candidate_queue, _g_per_stock_amount
         global _g_pending_sells, _g_pending_limitdown_sells, _g_sell_engine
         global _g_op_executed, _g_startup_done, _g_all_data, _g_index_data, _g_last_sell_fingerprint
+        global _g_timegate_skip_printed, _g_cooling_printed
 
         dt = _get_qmt_time(C)
         today = dt.strftime('%Y%m%d')
@@ -2983,6 +3011,8 @@ class StrategyRunner(object):
             _g_retry_skip_printed.clear()
             _g_failed_printed.clear()
             _g_last_sell_fingerprint = ''
+            _g_timegate_skip_printed.clear()
+            _g_cooling_printed = False
             _g_my_codes = read_holdings_file(INTRADAY_HOLD_FILE)
             _g_cumulative_pnl = read_nav_file(INTRADAY_NAV_FILE)
             _g_pending_buys = {}
@@ -3037,12 +3067,22 @@ class StrategyRunner(object):
             print("[SAFEMODE] %s 信号计算完成（只读），跳过所有交易执行" % today)
             return
 
-        # Layer 1: 全天卖出监测（仅限交易时段，TEST_MODE不再绕过时间检查）
+        # ===== P2: 启动 cooling-off 守卫 =====
+        if _is_in_cooling_off():
+            if not _g_cooling_printed:
+                print("  [%s] 启动 cooling-off 中（60s 内屏蔽所有交易）..." % STRATEGY_NAME)
+                _g_cooling_printed = True
+            return
+
+        # Layer 1: 全天卖出监测（仅限交易时段，TEST_MODE不再绕过时间检查；P2 加时段路由）
         if _is_trading_time(dt) and now < '1458':
             _check_pending_sells(C, today)
             _check_limitdown_sells(C, today)
             if _g_my_codes:
-                _check_and_execute_sell(C, today)
+                allowed = _get_allowed_sell_layers(now)
+                if allowed['layers']:
+                    _check_and_execute_sell(C, today, allowed_layers=allowed)
+                # 注：limitdown_sells 不受时段路由限制（已挂出的撤单/重发不阻断）
         elif now >= '1458':
             if not _g_today_done:
                 if _g_pending_buys:
