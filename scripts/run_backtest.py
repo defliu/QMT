@@ -1043,15 +1043,15 @@ def _calc_metrics(state, params, all_dates, all_data):
 def _format_report(result: BacktestResult, params: BacktestParams, strategy_name: str = "QMT") -> str:
     """终端可读的回测报告。"""
     lines = [
-        "━━━ QMT Backtest Report ━━━",
+        "=== QMT Backtest Report ===",
         f"Strategy: {strategy_name}",
-        f"Period: {params.start_date} → {params.end_date}",
-        f"Capital: ¥{params.initial_capital:,.0f}",
+        f"Period: {params.start_date} -> {params.end_date}",
+        f"Capital: CNY {params.initial_capital:,.0f}",
         "",
     ]
 
     if not result.success:
-        lines.append(f"状态: ❌ 失败")
+        lines.append(f"状态: [X] 失败")
         if result.error:
             lines.append(f"错误: {result.error}")
         return "\n".join(lines)
