@@ -25,6 +25,7 @@ class TestRunBacktestMinimum(unittest.TestCase):
                 benchmark='000001.SH',
                 out_root=out_root,
                 hold_periods='5,10,20',
+                signal_source='combo_XG',
             )
             summary = run_backtest(args)
             self.assertIn('run_id', summary)
