@@ -340,6 +340,19 @@ def main():
                 % old_line
             )
 
+    # --dev: 硬编码 TEST_MODE = True（开发版需全天可触发交易循环）
+    if args.dev:
+        old_line = "TEST_MODE = False"
+        new_line = "TEST_MODE = True"
+        if old_line in content:
+            content = content.replace(old_line, new_line)
+            print('  [dev] 硬编码 TEST_MODE = True')
+        else:
+            raise RuntimeError(
+                "未找到 '%s' 行，无法硬编码 TEST_MODE。请检查 adapters/qmt_wrapper.py 中的 TEST_MODE 定义。"
+                % old_line
+            )
+
     gbk_bytes = _force_gbk(content, OUTPUT_PATH)
 
     with open(OUTPUT_PATH, 'wb') as f:
