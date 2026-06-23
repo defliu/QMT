@@ -4,6 +4,11 @@
 # Authoritative output: 04_output_schema_freeze.md
 # Authoritative interface: 03_interface_freeze.md
 
+# v0.4 Strategy Registry (Phase 1 / Milestone A): 临时用 strategy_name 命名，
+# Milestone B 完成嵌套 strategy: 节迁移到 strategy_params: 后改回顶层 strategy:
+strategy_name: production/ima_uptrend_v31
+trading_model: next_open
+
 backtest:
   name: baseline
   start_date: "2025-09-02"
@@ -13,7 +18,7 @@ backtest:
 
 data:
   source: jince_zhisuan           # OPEN_QUESTION (OQ-2): pending v0.3 rename
-  path:   "F:/金策智算/_internal/databases/duckdb/quantifydata.duckdb"
+  path:   "E:/金策智算/_internal/databases/duckdb/quantifydata.duckdb"
   adjustment: hfq
 
 universe:

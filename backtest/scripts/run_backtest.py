@@ -58,6 +58,10 @@ def main(argv=None):
     exec_cfg = cfg.get("execution", {})
     strat_cfg = cfg.get("strategy", {})
 
+    # v0.4 Phase 1 / MS-A: 顶层 strategy_name + trading_model
+    v04_strategy_name = cfg.get("strategy_name") or "production/ima_uptrend_v31"
+    v04_trading_model = cfg.get("trading_model") or exec_cfg.get("price", "next_open")
+
     config_name = bt.get("name", "baseline")
     config_hash = compute_config_hash(raw_text)
 
@@ -83,6 +87,8 @@ def main(argv=None):
             config_name=config_name,
             config_hash=config_hash,
             universe_hash=universe_hash,
+            strategy_name=v04_strategy_name,
+            trading_model=v04_trading_model,
         )
     finally:
         reader.close()

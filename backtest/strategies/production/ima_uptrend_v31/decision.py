@@ -14,7 +14,7 @@ strategy_core constraints (03 section 1):
   - Python 3.6-safe.
 """
 from backtest.strategy_core import enums
-from backtest.strategy_core.risk_adapter import (
+from backtest.strategies.production.ima_uptrend_v31.risk_adapter import (
     evaluate_position_triggers, pick_top_reason, priority_of,
 )
 

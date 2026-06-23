@@ -27,7 +27,8 @@ import datetime as _dt
 import hashlib
 import logging
 
-from backtest.strategy_core.interface import evaluate_day
+from backtest.strategies import get_strategy, list_strategies
+import importlib as _importlib
 from backtest.engine.execution import fill_buy, fill_sell
 from backtest.engine.portfolio import Portfolio
 from backtest.engine.metrics import compute_metrics
@@ -36,6 +37,69 @@ log = logging.getLogger(__name__)
 
 _STRATEGY_CORE_VERSION = "0.2.0"
 _SUMMARY_SCHEMA_VERSION = "0.2"
+
+DEFAULT_BENCHMARK_DB = "F:/backtest_workspace/data/duckdb/benchmark_index.duckdb"
+
+
+def _load_benchmark_series(benchmark_code, calendar, benchmark_db_path):
+    """Load benchmark closes aligned to the run calendar (forward-fill on gaps).
+
+    Returns (closes_by_date, note). closes_by_date is dict {date: close}
+    covering every day in `calendar` (forward-filled from the latest prior
+    benchmark close). Returns (None, note) if benchmark cannot be used.
+    """
+    if not benchmark_code:
+        return None, ""
+    if not benchmark_db_path:
+        return None, u"benchmark_db_path 未配置"
+    if not os.path.isfile(benchmark_db_path):
+        return None, u"benchmark_index.duckdb 不存在: %s" % benchmark_db_path
+    try:
+        from backtest.data_tools.benchmark_reader import BenchmarkIndexReader
+        br = BenchmarkIndexReader(benchmark_db_path)
+        try:
+            # Pull a small lead-in window so we can forward-fill the first day
+            # if the calendar's first date predates the first benchmark bar.
+            rows = br.load_series(benchmark_code, calendar[0], calendar[-1])
+        finally:
+            br.close()
+    except Exception as e:
+        return None, u"benchmark 加载失败: %s" % e
+    if not rows:
+        return None, u"benchmark 在窗口内无数据 code=%s" % benchmark_code
+    bm_map = {d: c for d, c in rows if c is not None}
+    if not bm_map:
+        return None, u"benchmark close 全为空 code=%s" % benchmark_code
+    bm_dates_sorted = sorted(bm_map.keys())
+    # Forward-fill onto the run calendar. Days before the first benchmark
+    # row are left out of closes_by_date; the engine will treat them as gaps.
+    closes = {}
+    last = None
+    bi = 0
+    for d in calendar:
+        while bi < len(bm_dates_sorted) and bm_dates_sorted[bi] <= d:
+            last = bm_map[bm_dates_sorted[bi]]
+            bi += 1
+        if last is not None:
+            closes[d] = last
+    if not closes:
+        return None, (u"benchmark 起点晚于回测窗口 (首条=%s)" % bm_dates_sorted[0])
+    missing_head = [d for d in calendar if d not in closes]
+    if missing_head:
+        # Calendar 起点早于 benchmark 首条（常见原因：QMT 日历含元旦/周末
+        # placeholder bar，而 benchmark 只含真实交易日）。容忍最多 14 天的
+        # head gap：用 benchmark 首条 close 反向回填，使元旦期 benchmark
+        # daily_return = 0，不影响超额收益统计。
+        head_gap_tolerance_days = 14
+        if len(missing_head) <= head_gap_tolerance_days:
+            first_bm_close = bm_map[bm_dates_sorted[0]]
+            for d in missing_head:
+                closes[d] = first_bm_close
+        else:
+            return None, (u"benchmark 在窗口前期缺失 %d 天 (首=%s, 首条 bm=%s)"
+                          % (len(missing_head), missing_head[0],
+                         bm_dates_sorted[0]))
+    return closes, ""
 
 
 def _make_run_id(now=None):
@@ -95,9 +159,45 @@ def _unique_warnings(daily_warnings):
     return seen
 
 
+def resolve_strategy(strategy_name, trading_model):
+    """v0.4 Strategy Registry: 取策略 evaluate_fn + 校验 trading_model。
+
+    Args:
+        strategy_name: 如 'production/ima_uptrend_v31'；None 时默认 6+2。
+        trading_model: 如 'next_open'；None 时默认 'next_open'。
+
+    Returns:
+        (evaluate_fn, validated_trading_model)
+
+    Raises:
+        KeyError: 策略未注册（来自 get_strategy）
+        ValueError: trading_model 不在策略 ALLOWED_TRADING_MODELS 内
+
+    SPEC: specs/SPEC_BACKTEST_FACTORY_V0.4_GENERALIZATION_PHASE1.md §3.2
+    """
+    name = strategy_name or "production/ima_uptrend_v31"
+    fn = get_strategy(name)
+
+    mod_name = "backtest.strategies." + name.replace("/", ".") + ".strategy"
+    try:
+        mod = _importlib.import_module(mod_name)
+        allowed = list(getattr(mod, "ALLOWED_TRADING_MODELS", ["next_open"]))
+    except ImportError:
+        allowed = ["next_open"]
+
+    tm = trading_model or "next_open"
+    if tm not in allowed:
+        raise ValueError(
+            "trading_model=" + str(tm) +
+            " not in strategy.ALLOWED_TRADING_MODELS=" + str(allowed) +
+            " (strategy=" + name + ")"
+        )
+    return fn, tm
+
+
 def run_backtest(
     reader,                 # DuckDBDailyReader instance (or compatible)
-    universe,               # list of code strings
+    universe,               # list of code strings (PIT mode: union of all snapshots)
     start_date,             # "YYYY-MM-DD"
     end_date,               # "YYYY-MM-DD"
     strategy_config,        # dict (03 §4)
@@ -105,11 +205,18 @@ def run_backtest(
     initial_cash,           # float
     aux_data=None,
     benchmark_code=None,
+    benchmark_db_path=DEFAULT_BENCHMARK_DB,
     config_name="baseline",
     config_hash="",
     universe_hash="",
     run_id=None,
     now=None,
+    universe_by_date=None,  # P2.1 PIT: {as_of_date_str: [codes]}; if set, evaluate_day
+                            # receives the as-of snapshot per day (forward-fill prior).
+                            # `universe` MUST be the union of all snapshot codes so that
+                            # load_window pre-loads every code that any snapshot needs.
+    strategy_name=None,     # v0.4: registry key, 默认 'production/ima_uptrend_v31'
+    trading_model=None,     # v0.4: 默认 'next_open'；不在策略 ALLOWED 里则 ValueError
 ):
     """Run the full backtest. Returns an in-memory result struct.
 
@@ -117,6 +224,9 @@ def run_backtest(
     function intentionally does NOT touch the filesystem. (Test isolation +
     boundary clarity per night-shift §四.8.)
     """
+    # v0.4: Strategy Registry —— 解除与 6+2 的硬绑定
+    _evaluate_day, _trading_model = resolve_strategy(strategy_name, trading_model)
+
     started_at = now or _dt.datetime.now()
     run_id = run_id or _make_run_id(started_at)
 
@@ -130,11 +240,34 @@ def run_backtest(
     # Pre-load full market window for the run period.
     market_data = reader.load_window(universe, actual_min, actual_max)
 
+    # ----- Benchmark series (optional; degrade gracefully) -----
+    benchmark_closes, benchmark_note = _load_benchmark_series(
+        benchmark_code, calendar, benchmark_db_path)
+    benchmark_available = benchmark_closes is not None
+    if benchmark_code and not benchmark_available:
+        log.warning("benchmark disabled: %s", benchmark_note)
+
     pf = Portfolio(initial_cash=initial_cash)
     aux_for_eval = aux_data if aux_data is not None else {}
     if "trading_calendar" not in aux_for_eval or not aux_for_eval.get("trading_calendar"):
         aux_for_eval = dict(aux_for_eval)
         aux_for_eval["trading_calendar"] = calendar
+
+    # P2.1 PIT: pre-compute per-day universe from snapshots (forward-fill).
+    # universe_by_date maps as_of -> [codes]; for each calendar day pick the latest
+    # snapshot whose as_of <= today. Days before the first valid snapshot use [].
+    if universe_by_date:
+        snap_dates = sorted(universe_by_date.keys())
+        per_day_universe = {}
+        cur = []
+        snap_i = 0
+        for today in calendar:
+            while snap_i < len(snap_dates) and snap_dates[snap_i] <= today:
+                cur = list(universe_by_date[snap_dates[snap_i]])
+                snap_i += 1
+            per_day_universe[today] = list(cur)
+    else:
+        per_day_universe = None
 
     trades = []
     equity_rows = []
@@ -219,12 +352,13 @@ def run_backtest(
                 "is_last_trading_day":  False,
                 "max_positions":        int(strategy_config.get("max_positions", 5)),
             }
-            decision = evaluate_day(
+            decision = _evaluate_day(
                 current_date=today,
                 market_window=window,
                 positions=pf.position_list(),
                 cash=pf.cash,
-                universe=universe,
+                universe=(per_day_universe[today] if per_day_universe is not None
+                          else universe),
                 account_state=account_state,
                 strategy_config=strategy_config,
                 aux_data=aux_for_eval,
@@ -239,6 +373,52 @@ def run_backtest(
         else:
             pending = None
 
+    # ----- Benchmark fill on equity_rows (post-loop, in-place) -----
+    benchmark_returns = None
+    benchmark_total_return = None
+    if benchmark_available:
+        prev_close = None
+        bm_series = []  # parallel to equity_rows
+        for row in equity_rows:
+            d = row["date"]
+            close = benchmark_closes.get(d)
+            if close is None:
+                row["benchmark_close"] = ""
+                row["benchmark_return"] = ""
+                bm_series.append(None)
+                prev_close = None
+                continue
+            if prev_close is None or prev_close == 0:
+                bm_ret = 0.0
+            else:
+                bm_ret = (close / prev_close) - 1.0
+            row["benchmark_close"] = round(float(close), 6)
+            row["benchmark_return"] = round(float(bm_ret), 8)
+            bm_series.append(close)
+            prev_close = close
+        # Daily benchmark returns aligned with equity_rows[1:]; drop None pairs.
+        benchmark_returns = []
+        valid_pair = True
+        for i in range(1, len(bm_series)):
+            a, b = bm_series[i - 1], bm_series[i]
+            if a is None or b is None or a == 0:
+                valid_pair = False
+                break
+            benchmark_returns.append((b / a) - 1.0)
+        if not valid_pair:
+            benchmark_available = False
+            benchmark_note = u"benchmark 数据存在断点，禁用 IR/excess"
+            benchmark_returns = None
+        else:
+            first_close = bm_series[0]
+            last_close = bm_series[-1]
+            if first_close and first_close != 0:
+                benchmark_total_return = (last_close / first_close) - 1.0
+            else:
+                benchmark_available = False
+                benchmark_returns = None
+                benchmark_note = u"benchmark 起点价格为 0，禁用 IR/excess"
+
     # ----- Aggregate diagnostics -----
     diagnostics_aggregate = {
         "trigger_counts_total":      _sum_trigger_counts(daily_trigger_counts),
@@ -248,13 +428,14 @@ def run_backtest(
     }
 
     # ----- Performance -----
-    benchmark_available = bool(benchmark_code)
     performance = compute_metrics(
         equity_rows=equity_rows,
         trades=trades,
         trading_calendar=calendar,
         initial_cash=initial_cash,
         benchmark_available=benchmark_available,
+        benchmark_returns=benchmark_returns,
+        benchmark_total_return=benchmark_total_return,
     )
 
     # ----- Sample period warning (04 §1.3) -----
@@ -304,7 +485,7 @@ def run_backtest(
         "data_hash":       data_hash,
         "universe_hash":   universe_hash,
 
-        "data_source":     "jince_zhisuan",   # OPEN_QUESTION (OQ-2): pending v0.3
+        "data_source":     getattr(reader, "data_source", "jince_zhisuan"),
         "data_path":       reader.db_path,
         "data_mtime":      cov.get("db_mtime", ""),
         "data_adjustment": "hfq",
@@ -328,8 +509,7 @@ def run_backtest(
 
         "benchmark_code":      benchmark_code,
         "benchmark_available": benchmark_available,
-        "benchmark_note":      ("DuckDB 当前无指数数据，benchmark 已禁用"
-                                if not benchmark_available else ""),
+        "benchmark_note":      (benchmark_note if not benchmark_available else ""),
 
         "sector_heat_available": False,
         "sector_heat_mode":      strategy_config.get("sector_heat_mode", "zero"),
@@ -346,6 +526,16 @@ def run_backtest(
             "n_positions":  len(pf.positions),
         },
         "diagnostics_aggregate": diagnostics_aggregate,
+
+        "pit_universe": (
+            {
+                "enabled":      True,
+                "n_snapshots":  len(universe_by_date),
+                "snapshot_dates": sorted(universe_by_date.keys()),
+                "union_size":   len(universe),
+            } if universe_by_date else
+            {"enabled": False}
+        ),
     }
 
     return {

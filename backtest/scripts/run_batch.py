@@ -118,6 +118,10 @@ def _run_one_leaf(leaf_cfg, batch_id, leaf_index, leaf_name):
     exec_cfg = leaf_cfg.get("execution", {})
     strat_cfg = leaf_cfg.get("strategy", {})
 
+    # v0.4 Phase 1 / MS-A: 顶层 strategy_name + trading_model
+    v04_strategy_name = leaf_cfg.get("strategy_name") or "production/ima_uptrend_v31"
+    v04_trading_model = leaf_cfg.get("trading_model") or exec_cfg.get("price", "next_open")
+
     base_name = bt.get("name", "baseline")
     config_name = base_name + "__" + leaf_name
     raw_text = json.dumps(leaf_cfg, sort_keys=True, ensure_ascii=False)
@@ -143,6 +147,8 @@ def _run_one_leaf(leaf_cfg, batch_id, leaf_index, leaf_name):
             config_name=config_name,
             config_hash=config_hash,
             universe_hash=universe_hash,
+            strategy_name=v04_strategy_name,
+            trading_model=v04_trading_model,
         )
     finally:
         reader.close()

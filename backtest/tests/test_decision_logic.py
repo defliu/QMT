@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 import pytest
 from backtest.strategy_core import enums
-from backtest.strategy_core.decision import make_decision
-from backtest.strategy_core.risk_adapter import (
+from backtest.strategies.production.ima_uptrend_v31.decision import make_decision
+from backtest.strategies.production.ima_uptrend_v31.risk_adapter import (
     evaluate_position_triggers, pick_top_reason, priority_of,
 )
 

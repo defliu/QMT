@@ -1,45 +1,37 @@
 # coding: utf-8
-"""
-strategy_core.interface -- frozen evaluate_day signature + decision factory.
+"""DEPRECATED: strategy_core.interface
 
-Authoritative source: agent_hub/2026-06-13_backtest_mvp/03_interface_freeze.md
-  - evaluate_day signature : section 1  (8 params, fixed order)
-  - StrategyDecision shape : section 6  (6 top-level keys; diagnostics has 4 keys)
-  - sell reasons / blocked : sections 7 / 8
+v0.3 frozen contract 入口；v0.4 起 6+2 物理迁出，本模块降级为 shim，
+转调 backtest.strategies.production.ima_uptrend_v31。
 
-Task 2.4 integrated: evaluate_day now drives the full pipeline
-  score_universe -> make_decision and merges scoring warnings into
-  decision.diagnostics.warnings. make_empty_decision() is preserved for
-  callers/tests that need a zeroed shape.
+新代码请使用：
+    from backtest.strategies import get_strategy
+    evaluate_day = get_strategy("production/ima_uptrend_v31")
 
-3.6-safe constraints (03 section 1 constraint 3):
-  - no `dict[str, ...]` / `list[str]` annotations
-  - no `str | None` unions
-  - no walrus, no match/case, no dataclass
-  - keep f-strings out of the hot path; this module uses none
-
-Purity constraints (03 section 1 constraints 1 & 2):
-  - no IO / network / time-based randomness
-  - no xtquant / passorder / get_trade_detail_data / ContextInfo imports
-  - inputs are not mutated (None aux_data is rebuilt as a fresh empty dict)
+SPEC: specs/SPEC_BACKTEST_FACTORY_V0.4_GENERALIZATION_PHASE1.md §4.1 / §五 Step 3
 """
 
-from backtest.strategy_core.scoring_adapter import score_universe
-from backtest.strategy_core.decision import make_decision
+import warnings
+
+# 触发注册（import side effect）
+from backtest.strategies import get_strategy  # noqa: F401
+from backtest.strategies.production.ima_uptrend_v31.strategy import (
+    evaluate_day as _evaluate_day_impl,
+)
 
 
 def make_empty_decision():
-    """Return a fresh StrategyDecision dict shaped exactly per 03 section 6.
+    """v0.4 schema 的空 decision。
 
-    Every call returns a NEW dict (no shared mutable state) so callers may
-    mutate the result in-place without polluting subsequent calls. The shape
-    is the contract downstream engine / report code rely on; do not drop or
-    rename keys without re-running Phase 2.0 GATE.
+    通用字段提升到 diagnostics 顶层（warnings / candidate_total / candidate_passed）；
+    6+2 私有字段下沉到 diagnostics.strategy_specific.ima_uptrend_v31.* —— 但
+    Milestone A 阶段为保证 sha256 一致性，先沿用 v0.3 扁平 schema，Milestone B
+    再做 namespace 化（按里程碑节奏，本步暂不动 diagnostics 内部布局）。
     """
     return {
         "sell_decisions":      [],
         "buy_candidates":      [],
-        "target_positions":    [],   # MVP: empty list, reserved for v0.3+
+        "target_positions":    [],
         "blocked_candidates":  [],
         "diagnostics": {
             "scores": {},
@@ -71,59 +63,32 @@ def make_empty_decision():
 
 
 def evaluate_day(
-    current_date,        # str, "YYYY-MM-DD"
-    market_window,       # dict, code -> DataFrame[date, open, high, low, close, vol, amount]
-    positions,           # list of position dicts (03 section 2)
-    cash,                # float, available cash (CNY)
-    universe,            # list of code strings (already de-duped / disabled-stripped)
-    account_state,       # dict (03 section 3)
-    strategy_config,     # dict (03 section 4)
-    aux_data,            # dict (03 section 5)
+    current_date,
+    market_window,
+    positions,
+    cash,
+    universe,
+    account_state,
+    strategy_config,
+    aux_data,
 ):
-    """Decide T+1 (or T close) trading intentions for current_date.
+    """DEPRECATED shim → production/ima_uptrend_v31.
 
-    Integration pipeline (Task 2.4):
-      1. score_universe(market_window) -> records (per 03 section 6
-         diagnostics.scores schema) + warnings.
-      2. make_decision(...) -> full StrategyDecision dict.
-      3. Append scoring warnings into decision.diagnostics.warnings.
-
-    See 03 section 1 for the full contract. Keep parameter order/names as
-    listed -- they are part of the frozen interface (03 section 1
-    constraint 4).
-
-    Notes on purity / None handling:
-      - aux_data may be None; we substitute a fresh empty dict locally so
-        downstream code (decision layer reads aux_data.get("warnings", []))
-        does not crash. The caller's None is never written to.
-      - sector_heat_mode != "zero" intentionally raises NotImplementedError
-        out of score_universe (03 section 4 constraint 2).
+    保留 8 参签名以兼容现有调用方；新代码请通过 get_strategy() 获取。
     """
-    cfg = strategy_config or {}
-    sector_heat_mode = cfg.get("sector_heat_mode", "zero")
-    aux_for_pipeline = aux_data if aux_data is not None else {}
-
-    score_records, score_warnings = score_universe(
-        market_window or {},
-        sector_heat_mode=sector_heat_mode,
-        aux_data=aux_for_pipeline,
-        return_warnings=True,
+    warnings.warn(
+        "backtest.strategy_core.interface.evaluate_day is deprecated; "
+        "use backtest.strategies.get_strategy('production/ima_uptrend_v31') instead.",
+        DeprecationWarning,
+        stacklevel=2,
     )
-
-    decision = make_decision(
-        current_date=current_date,
-        market_window=market_window,
-        positions=positions,
-        cash=cash,
-        universe=universe,
-        account_state=account_state,
-        strategy_config=strategy_config,
-        aux_data=aux_for_pipeline,
-        score_records=score_records,
+    return _evaluate_day_impl(
+        current_date,
+        market_window,
+        positions,
+        cash,
+        universe,
+        account_state,
+        strategy_config,
+        aux_data,
     )
-
-    # Merge scoring warnings into decision diagnostics (03 section 6 key 3).
-    if score_warnings:
-        decision["diagnostics"]["warnings"].extend(score_warnings)
-
-    return decision

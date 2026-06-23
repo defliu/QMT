@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from backtest.strategy_core.scoring_adapter import score_universe
+from backtest.strategies.production.ima_uptrend_v31.scoring_adapter import score_universe
 
 
 def _mw(code, n=80, base=10.0):
