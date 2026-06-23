@@ -1,0 +1,14 @@
+=== sha256 business-cols bit-identical compare (SPEC ¡ì6.1) ===
+  trades.csv           OK   old=a7fc0b3fb026  new=a7fc0b3fb026
+  equity_curve.csv     OK   old=95cac56f0d21  new=95cac56f0d21
+  positions.csv        OK   old=cf926528433c  new=cf926528433c
+
+=== summary.json business numerics compare ===
+  total_return           OK  old='<MISSING>'  new='<MISSING>'
+  annualized_return      OK  old='<MISSING>'  new='<MISSING>'
+  sharpe                 OK  old='<MISSING>'  new='<MISSING>'
+  max_drawdown           OK  old='<MISSING>'  new='<MISSING>'
+  n_trades               OK  old='<MISSING>'  new='<MISSING>'
+  version (allowed-diff)  old=None  new=None
+
+RESULT: PASS ¡ª trades/equity/positions business cols bit-identical; summary numerics OK
