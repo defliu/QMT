@@ -1,0 +1,4 @@
+code,date,box_breakout_XG,box_箱体振幅_ok,box_均线黏连_ok,box_放量_ok,box_突破_ok,box_涨幅_ok,double_zhongjun_XG,double_多头排列_ok,double_均线发散_ok,double_MACD_ok,double_CCI_ok,double_突破压力_ok,double_MA20向上_ok,double_MA60向上_ok,double_大盘_ok,combo_XG
+A_组合通过,2026-05-30,True,True,True,True,True,True,True,True,True,True,True,True,True,True,True,True
+B_只过箱体,2026-05-30,True,True,True,True,True,True,False,True,False,True,True,True,True,True,True,False
+C_全部不过,2026-05-30,False,True,True,False,False,False,False,False,False,False,False,False,True,False,True,False

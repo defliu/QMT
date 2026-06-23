@@ -1,0 +1,36 @@
+# 黄氏主升浪「箱体突破初选 + 双中军精筛」组合选股配置
+# SPEC: D:/QMT_STRATEGIES/specs/SPEC_HUANG_MAIN_UPTREND_TDX_TO_QMT.md
+# 所有默认值必须与 SPEC §D 一致, 不得擅改
+
+# ===== 箱体突破版（初选层） =====
+box:
+  N: 60                    # 箱体观察周期（日）
+  amp_thresh: 20.0         # 箱体振幅阈值 <20%
+  ma_short: 5              # MA_SHORT, 原公式定义但未参与 XG, 保留不参与
+  ma_adhere_thresh: 5.0    # 均线差阈值 <5%
+  vol_ratio: 1.5           # V > MA(V,5) * 1.5
+  break_tol: 0.995         # C >= 箱顶 * 0.995
+  pct_thresh: 0.05         # 涨幅阈值 >0.05
+
+# ===== 双中军版（精筛层） =====
+zhongjun:
+  ma5: 5
+  ma10: 10
+  ma20: 20
+  ma60: 60
+  ma120: 120
+  angle_thresh: 30.0       # MA5 角度阈值 >30
+  divergence_thresh: 1.05  # MA5/MA20 发散阈值 >1.05
+  macd_fast: 12            # MACD DIF EMA 快线
+  macd_slow: 26            # MACD DIF EMA 慢线
+  macd_signal: 9           # MACD DEA EMA 周期
+  cci_period: 14
+  cci_thresh: 100.0
+  breakout_N: 20           # 突破压力位回看周期
+  breakout_upper: 1.08     # CLOSE/近期高点 <1.08
+  ma20_up_n: 5             # MA20 向上回看周期
+  ma60_up_n: 5             # MA60 向上回看周期
+
+# ===== 大盘指数 (INDEXC) =====
+benchmark:
+  code: '000001.SH'        # 上证综指（诚哥 2026-06-23 拍板）
