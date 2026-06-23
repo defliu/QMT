@@ -37,13 +37,18 @@ def parse_args():
     p.add_argument('--benchmark', default='000001.SH')
     p.add_argument('--out-root', default='F:/backtest_workspace')
     p.add_argument('--hold-periods', default='5,10,20')
+    p.add_argument('--signal-source', default='combo_XG',
+                   choices=['combo_XG', 'double_zhongjun_XG', 'box_breakout_XG'],
+                   help='信号源字段; 默认 combo_XG (SPEC v1.2 窗口语义)')
     return p.parse_args()
 
 
-def _make_run_id(start, end, n_codes, n_trade_days):
-    h = hashlib.md5(('%s|%s|%d|%d' % (start, end, n_codes, n_trade_days)).encode()).hexdigest()[:8]
+def _make_run_id(start, end, n_codes, n_trade_days, signal_source='combo_XG'):
+    key = '%s|%s|%d|%d|%s' % (start, end, n_codes, n_trade_days, signal_source)
+    h = hashlib.md5(key.encode()).hexdigest()[:8]
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-    return 'huang_combo_%s_%s' % (ts, h)
+    src_short = signal_source.replace('_XG', '').replace('double_', 'zj_')
+    return 'huang_combo_%s_%s_%s' % (src_short, ts, h)
 
 
 def run_backtest(args):
@@ -66,20 +71,25 @@ def run_backtest(args):
     print('       signal rows:', len(result))
 
     # 5. 信号统计 (SPEC v1.2: combo_XG 已是 box_window_hit AND zhongjun, 不再是同日 AND)
-    sig = result[result['combo_XG'] == True].copy()
+    signal_source = args.signal_source
+    if signal_source not in result.columns:
+        raise ValueError('signal_source=%s 不在 selector 输出字段中; 可用: %s'
+                         % (signal_source, list(result.columns)))
+    sig = result[result[signal_source] == True].copy()
     n_box = int(result['box_breakout_XG'].sum())
     n_zj = int(result['double_zhongjun_XG'].sum())
     n_window_hit = int(result['box_window_hit'].sum())
-    n_combo = len(sig)
+    n_combo = int(result['combo_XG'].sum())
     print('[step] box_breakout_XG signals:', n_box)
     print('[step] double_zhongjun_XG signals:', n_zj)
     print('[step] box_window_hit (any day in last 120 trading days):', n_window_hit)
-    print('[step] combo_XG (window_hit AND zhongjun):', n_combo,
+    print('[step] combo_XG (window_hit AND zhongjun):', n_combo)
+    print('[step] using signal_source=%s -> %d signals' % (signal_source, len(sig)),
           '(across', sig['code'].nunique() if len(sig) else 0, 'stocks,',
           sig['date'].nunique() if len(sig) else 0, 'trading days)')
 
-    # 信号间隔分布 (SPEC v1.2 §E 第 3 条)
-    if len(sig):
+    # 信号间隔分布 (仅 combo_XG 信号有 box_days_since_last_signal 含义)
+    if len(sig) and signal_source == 'combo_XG':
         gaps = sig['box_days_since_last_signal'].dropna()
         if len(gaps):
             print('[step] box→zhongjun 间隔天数: min=%.0f median=%.0f mean=%.1f max=%.0f' %
@@ -180,7 +190,7 @@ def run_backtest(args):
     print('[step] empty days:', len(empty_days), '/', len(all_trading_days),
           '(%.1f%%)' % (100.0 * len(empty_days) / max(1, len(all_trading_days))))
 
-    run_id = _make_run_id(args.start, args.end, len(codes), len(bench))
+    run_id = _make_run_id(args.start, args.end, len(codes), len(bench), signal_source)
     out_dir = os.path.join(args.out_root, run_id)
     os.makedirs(out_dir, exist_ok=True)
 
@@ -201,9 +211,11 @@ def run_backtest(args):
         'total_trading_days': len(bench),
         'spec_version': 'v1.2',
         'box_window_N': 120,
+        'signal_source': signal_source,
         'box_breakout_signals': n_box,
         'double_zhongjun_signals': n_zj,
         'box_window_hit_signals': n_window_hit,
+        'combo_xg_signals': n_combo,
         'signal_rows': int(len(sig)),
         'signal_unique_stocks': int(sig['code'].nunique()) if len(sig) else 0,
         'signal_unique_days': int(sig['date'].nunique()) if len(sig) else 0,
