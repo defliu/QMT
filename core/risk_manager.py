@@ -72,13 +72,14 @@ class Action(Enum):
 class SellDecision:
     """分层决策结果"""
     def __init__(self, action=Action.HOLD, code='', sell_pct=0.0, reason='',
-                 triggered_layer='', triggered_signals=None):
+                 triggered_layer='', triggered_signals=None, triggered_sublayer=None):
         self.action = action
         self.code = code
         self.sell_pct = sell_pct
         self.reason = reason
         self.triggered_layer = triggered_layer
         self.triggered_signals = triggered_signals if triggered_signals is not None else []
+        self.triggered_sublayer = triggered_sublayer
 
     @staticmethod
     def hold():
@@ -89,8 +90,8 @@ class SellDecision:
         return SellDecision(Action.REDUCE, code, pct, reason, layer, signals or [])
 
     @staticmethod
-    def clear(code, reason, layer, signals=None):
-        return SellDecision(Action.CLEAR, code, 1.0, reason, layer, signals or [])
+    def clear(code, reason, layer, signals=None, sublayer=None):
+        return SellDecision(Action.CLEAR, code, 1.0, reason, layer, signals or [], triggered_sublayer=sublayer)
 
 
 class SellPositionState:
@@ -565,8 +566,11 @@ class SellStrategyEngine:
                 signals.append("移动止盈")
 
         if signals:
+            trailing_sublayer = None
+            if len(signals) == 1 and signals[0] == "移动止盈":
+                trailing_sublayer = 'trailing'
             return SellDecision.clear(
-                code, " | ".join(signals), "清仓层", signals
+                code, " | ".join(signals), "清仓层", signals, sublayer=trailing_sublayer
             )
         return SellDecision.hold()
 

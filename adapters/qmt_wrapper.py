@@ -136,6 +136,7 @@ _g_wait_printed = False
 _g_pending_buys = {}
 _g_retry_queue = []
 _g_candidate_queue = []
+_g_strategy_start_ts = None   # 策略启动时间戳（cooling-off 用）
 _g_per_stock_amount = 0
 _g_pending_sells = {}
 _g_pending_limitdown_sells = {}  # {code: {info dict}} - limit-down deferred sell queue
@@ -1724,6 +1725,44 @@ def _write_daily_log(today, C):
 
 
 # ============================================================
+#  分时段卖出控制（P1 声明，P2 接通）
+# ============================================================
+
+def _get_allowed_sell_layers(now):
+    """根据当前时点决定本轮允许哪些 sell decision triggered_layer 通过。
+    
+    返回 dict:
+        {'layers': set[str],           # 允许的 layer 白名单
+         'exclude_sublayers': set[str]} # 排除的 sublayer 黑名单
+    layers 为空集表示本时段不允许任何卖出。
+    """
+    if now < '0925':
+        return {'layers': set(), 'exclude_sublayers': set()}
+    if now < '0930':
+        return {'layers': set(), 'exclude_sublayers': set()}
+    if now < '0935':
+        return {'layers': {'底线层'}, 'exclude_sublayers': set()}
+    if now < '0940':
+        return {'layers': {'底线层', '清仓层'}, 'exclude_sublayers': {'trailing'}}
+    if now < '1440':
+        return {'layers': {'底线层', '清仓层', '预警层', '确认层', 'warning_add'},
+                'exclude_sublayers': set()}
+    if now < '1458':
+        return {'layers': {'底线层', '清仓层', '预警层', '确认层', 'warning_add'},
+                'exclude_sublayers': set()}
+    return {'layers': set(), 'exclude_sublayers': set()}
+
+
+def _is_in_cooling_off():
+    """策略启动后 60 秒内屏蔽所有交易。
+    P1 只声明不调用，P2 接通 handlebar。
+    """
+    if _g_strategy_start_ts is None:
+        return False
+    return (time.time() - _g_strategy_start_ts) < 60
+
+
+# ============================================================
 #  卖出集成
 # ============================================================
 
@@ -2876,6 +2915,7 @@ class StrategyRunner(object):
         global _g_init_done, _g_trader, _g_scorer, _g_cumulative_pnl
         global _g_pending_buys, _g_retry_queue, _g_candidate_queue, _g_per_stock_amount
         global _g_pending_sells, _g_pending_limitdown_sells, _g_sell_engine
+        global _g_strategy_start_ts
 
         if _g_init_done:
             return
@@ -2907,6 +2947,7 @@ class StrategyRunner(object):
         )
         _g_sell_engine.load_state()
 
+        _g_strategy_start_ts = time.time()
         _g_init_done = True
         print("[%s] 初始化完成  账号=%s" % (STRATEGY_NAME, ACCOUNT_ID))
         print("[%s] 策略本金=%d  累计盈亏=%+.0f  当前净值=%.0f" % (
