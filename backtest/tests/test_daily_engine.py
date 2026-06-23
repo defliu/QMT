@@ -290,11 +290,13 @@ def test_no_io_writes_to_workspace(tmp_path, monkeypatch):
 def test_no_lookahead_window_leaks_future_dates():
     """Verify the window passed to evaluate_day never includes future dates.
 
-    We monkey-patch evaluate_day to capture market_window.
+    v0.4 起 daily_engine 通过 registry 取 evaluate_day（不再有顶级 eng.evaluate_day），
+    所以 spy 直接挂在 strategies._REGISTRY 上拦截。
     """
     seen = []
-    from backtest.engine import daily_engine as eng
-    real = eng.evaluate_day
+    from backtest.strategies import _REGISTRY
+    name = "production/ima_uptrend_v31"
+    real = _REGISTRY[name]
 
     def spy(current_date, market_window, **kw):
         for code, df in (market_window or {}).items():
@@ -302,7 +304,7 @@ def test_no_lookahead_window_leaks_future_dates():
             seen.append((str(current_date), code, max_date))
         return real(current_date=current_date, market_window=market_window, **kw)
 
-    eng.evaluate_day = spy
+    _REGISTRY[name] = spy
     try:
         universe = ["000001.SZ"]
         market, dates = _build_market(universe, n_days=65)
@@ -314,7 +316,7 @@ def test_no_lookahead_window_leaks_future_dates():
             initial_cash=1_000_000.0, universe_hash="u", config_hash="c",
         )
     finally:
-        eng.evaluate_day = real
+        _REGISTRY[name] = real
 
     for cur, code, max_d in seen:
         assert max_d <= cur, "window leaked future date %s on day %s for %s" % (max_d, cur, code)
