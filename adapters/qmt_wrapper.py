@@ -141,7 +141,7 @@ _g_cooling_printed = False        # P2: cooling-off 首次提示防刷屏
 _g_timegate_skip_printed = set()  # P2: 防刷屏 — 已打印的"时段拦截"事件 (kind, code, key)
 
 # ===== P3: 集合竞价预埋硬止损 =====
-PREMARKET_HARD_STOP_MODE = 'G3_ONLY'  # 'OFF' / 'G3_ONLY' / 'G2_AND_G3'
+PREMARKET_HARD_STOP_MODE = 'OFF'  # 'OFF' / 'G3_ONLY' / 'G2_AND_G3'  P3 观察期: 验日K字段后切回 'G3_ONLY'
 _g_premarket_check_done = False       # 单日跑一次的防重入 flag（日切清空）
 _g_premarket_orders = {}              # code -> {order_id, grade, price, shares, ref_price}
 
@@ -1798,6 +1798,62 @@ def _get_premarket_ref_price(C, code):
     return ref_price, prev_close
 
 
+def _log_premarket_diagnostic(C, today, now):
+    """P3 观察期: 把 09:25 日K close[-1]/close[-2] 与 tick lastPrice/preClose 写到
+    D:\\QMT_POOL\\premarket_diag_YYYYMMDD.csv 用于验证 close[-1] 是否反映撮合价。
+    每天只写一次（由 _g_premarket_check_done 守护，调用方负责）。
+    异常不抛，只打印。
+    """
+    if C is None or not _g_my_codes:
+        return
+    try:
+        codes = list(_g_my_codes.keys())
+        md = {}
+        try:
+            md = C.get_market_data_ex(['close'], codes, period='1d', count=2) or {}
+        except Exception as e:
+            print("    [P3诊断] get_market_data_ex 异常: %s" % e)
+        tick = {}
+        try:
+            tick = C.get_full_tick(codes) or {}
+        except Exception as e:
+            print("    [P3诊断] get_full_tick 异常: %s" % e)
+
+        path = 'D:/QMT_POOL/premarket_diag_%s.csv' % today
+        write_header = not os.path.exists(path)
+        try:
+            f = open(path, 'a')
+            try:
+                if write_header:
+                    f.write('timestamp,today,now,code,md_close_minus_1,md_close_minus_2,tick_lastPrice,tick_preClose,tick_open,tick_high,tick_low\n')
+                ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                for code in codes:
+                    md_c1 = ''
+                    md_c2 = ''
+                    df = md.get(code) if md else None
+                    if df is not None and len(df) >= 2:
+                        try:
+                            md_c1 = '%.4f' % float(df['close'].iloc[-1])
+                            md_c2 = '%.4f' % float(df['close'].iloc[-2])
+                        except Exception:
+                            pass
+                    t = tick.get(code, {}) if tick else {}
+                    last_p = t.get('lastPrice', '')
+                    pre_c = t.get('preClose', '')
+                    op = t.get('open', '')
+                    hi = t.get('high', '')
+                    lo = t.get('low', '')
+                    f.write('%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n'
+                            % (ts, today, now, code, md_c1, md_c2, last_p, pre_c, op, hi, lo))
+            finally:
+                f.close()
+            print("    [P3诊断] 已写 %s (%d 只)" % (path, len(codes)))
+        except Exception as e:
+            print("    [P3诊断] 写文件异常: %s" % e)
+    except Exception as e:
+        print("    [P3诊断] 整体异常: %s" % e)
+
+
 def _check_pre_market_hard_stop(C, today, now):
     """09:25-09:29:59 集合竞价锁定区扫描持仓，按 grade 决定是否预埋硬止损单。
     单日只跑一次，由 _g_premarket_check_done 守护。
@@ -1806,9 +1862,13 @@ def _check_pre_market_hard_stop(C, today, now):
 
     if _g_premarket_check_done:
         return
+
+    # P3 观察期: 不论模式都先写诊断 CSV (每日一次，由 _g_premarket_check_done 守护)
+    _log_premarket_diagnostic(C, today, now)
+
     if PREMARKET_HARD_STOP_MODE == 'OFF':
         _g_premarket_check_done = True
-        print("  [%s] 集合竞价预埋: 模式 OFF, 跳过" % STRATEGY_NAME)
+        print("  [%s] 集合竞价预埋: 模式 OFF, 跳过 (诊断已写)" % STRATEGY_NAME)
         return
     if _g_sell_engine is None or not _g_my_codes:
         _g_premarket_check_done = True
