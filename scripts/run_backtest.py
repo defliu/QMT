@@ -75,6 +75,7 @@ class BacktestState:
         self.next_order_id = 1000
         self.current_date = ''
         self.current_prices = {}     # {code: price} — 当前 bar 的收盘价
+        self.current_bar = 0
 
 
 def _get_current_price(code: str) -> float:
@@ -268,7 +269,9 @@ class BacktestContext:
         """返回当前 bar 的 datetime。"""
         if 0 <= self._current_bar < len(self._all_dates):
             ds = self._all_dates[self._current_bar]
-            return datetime.strptime(f"{ds} {self._time_str}", '%Y-%m-%d %H%M')
+            if '-' in ds:
+                return datetime.strptime(f"{ds} {self._time_str}", '%Y-%m-%d %H%M')
+            return datetime.strptime(f"{ds} {self._time_str}", '%Y%m%d %H%M')
         return datetime.now()
 
     def get_full_tick(self, codes=None):
@@ -619,7 +622,6 @@ def _download_and_prepare_data(stock_codes, start_date, end_date, benchmark, per
     except ImportError:
         raise RuntimeError("xtquant 未安装。请先运行: python scripts/setup_xtquant.py")
 
-    # 检查 xtdata 连通性
     try:
         xtdata.connect()
     except Exception:
@@ -629,61 +631,102 @@ def _download_and_prepare_data(stock_codes, start_date, end_date, benchmark, per
         )
 
     all_codes = list(set(stock_codes + [benchmark]))
+    start_ts = pd.Timestamp(start_date)
+    end_ts = pd.Timestamp(end_date)
+    warmup_start = (start_ts - timedelta(days=500)).strftime('%Y%m%d')
+    start_ymd = start_date.replace('-', '')
+    end_ymd = end_date.replace('-', '')
+    cal_days = max((end_ts - start_ts).days, 1)
+    req_bars = max(int(cal_days * 252 / 365 * 1.5) + 180, 400)
 
-    # 下载历史数据
     for code in all_codes:
         try:
-            xtdata.download_history_data(code, period, start_time=start_date, end_time=end_date)
+            xtdata.download_history_data(code, period, start_time=warmup_start, end_time=end_ymd)
         except Exception as e:
             print(f"  [下载] {code}: {e}", file=sys.stderr)
 
-    # 读取数据
     all_data = {}
-    all_dates = None
+    all_dates_set = set()
     stock_names = {}
 
     for code in all_codes:
-        df_raw = xtdata.get_market_data_ex(
-            field_list=[],
-            stock_list=[code],
-            period=period,
-            start_time=start_date,
-            end_time=end_date,
-            count=-1,
-            dividend_type='front',
-        )
+        try:
+            raw = xtdata.get_local_data(
+                field_list=['open', 'high', 'low', 'close', 'volume'],
+                stock_list=[code],
+                period=period,
+                end_time=end_ymd,
+                count=req_bars,
+                dividend_type='front',
+                fill_data=True,
+            )
+        except Exception as e:
+            print(f"  [读取] {code}: {e}", file=sys.stderr)
+            continue
 
-        if code not in df_raw or df_raw[code].empty:
+        if not raw or code not in raw:
             print(f"  [警告] {code} 无数据", file=sys.stderr)
             continue
 
-        df = df_raw[code].copy()
+        src = raw[code]
+        if src is None or len(src) == 0:
+            print(f"  [警告] {code} 无数据", file=sys.stderr)
+            continue
 
-        # 确保按时间升序（index 0 为最早）
-        if len(df) >= 2:
-            try:
-                if df.index[0] > df.index[-1]:
-                    df = df.iloc[::-1]
-            except Exception:
-                pass
+        df = pd.DataFrame(src).copy()
+        if df.empty:
+            print(f"  [警告] {code} 无数据", file=sys.stderr)
+            continue
 
-        # 验证必备列
-        for col in ['close', 'open', 'high', 'low', 'volume']:
-            if col not in df.columns:
-                print(f"  [警告] {code} 缺少列: {col}", file=sys.stderr)
-                continue
+        if 'time' in df.columns:
+            dates = pd.to_datetime(df['time'].astype(str).str[:8], format='%Y%m%d', errors='coerce')
+            df.index = dates
+            df.drop(columns=['time'], inplace=True)
+        elif not isinstance(df.index, pd.DatetimeIndex):
+            idx = df.index.astype(str)
+            dates = pd.to_datetime(idx.str[:8], format='%Y%m%d', errors='coerce')
+            if dates.notna().any():
+                df.index = dates
+
+        if not isinstance(df.index, pd.DatetimeIndex):
+            print(f"  [警告] {code} 无有效日期索引", file=sys.stderr)
+            continue
+
+        df = df[df.index.notna()]
+        df.sort_index(inplace=True)
+        df = df[df.index <= end_ts]
+        if not ((df.index >= start_ts) & (df.index <= end_ts)).any():
+            print(f"  [警告] {code} 在指定日期范围内无数据", file=sys.stderr)
+            continue
+
+        missing_cols = [c for c in ['open', 'high', 'low', 'close', 'volume'] if c not in df.columns]
+        if missing_cols:
+            print(f"  [警告] {code} 缺少列: {missing_cols}", file=sys.stderr)
+            continue
+
+        df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
+        df = df.dropna(subset=['open', 'high', 'low', 'close', 'volume'])
+        df = df[df['close'] > 0]
+        if df.empty:
+            print(f"  [警告] {code} 质量过滤后无数据", file=sys.stderr)
+            continue
 
         all_data[code] = df
+        all_dates_set.update(d.strftime('%Y-%m-%d') for d in df.index)
 
-        # 取第一只股票的日期作为交易日序列
-        if all_dates is None:
-            if isinstance(df.index, pd.DatetimeIndex):
-                all_dates = [d.strftime('%Y-%m-%d') for d in df.index]
-            else:
-                all_dates = [str(d) for d in df.index]
-
-    if all_dates is None:
+    all_dates = sorted(all_dates_set)
+    if not all_dates:
         raise RuntimeError("无法获取交易日数据")
+
+    all_dates_index = pd.to_datetime(all_dates)
+    for code, df in list(all_data.items()):
+        df = df[~df.index.duplicated(keep='last')]
+        df = df.reindex(all_dates_index).ffill()
+        df.index = all_dates_index
+        if not ((df.index >= start_ts) & (df.index <= end_ts)).any():
+            all_data.pop(code, None)
+            continue
+        all_data[code] = df
 
     return all_data, all_dates, stock_names
 
@@ -1043,15 +1086,15 @@ def _calc_metrics(state, params, all_dates, all_data):
 def _format_report(result: BacktestResult, params: BacktestParams, strategy_name: str = "QMT") -> str:
     """终端可读的回测报告。"""
     lines = [
-        "━━━ QMT Backtest Report ━━━",
+        "=== QMT Backtest Report ===",
         f"Strategy: {strategy_name}",
-        f"Period: {params.start_date} → {params.end_date}",
-        f"Capital: ¥{params.initial_capital:,.0f}",
+        f"Period: {params.start_date} -> {params.end_date}",
+        f"Capital: CNY {params.initial_capital:,.0f}",
         "",
     ]
 
     if not result.success:
-        lines.append(f"状态: ❌ 失败")
+        lines.append(f"状态: [X] 失败")
         if result.error:
             lines.append(f"错误: {result.error}")
         return "\n".join(lines)
@@ -1124,9 +1167,9 @@ def _compute_mock_sector_heat(all_data, bar_i, valid_codes, lookback=5, force_re
 
     对池中每只股票计算 (close[bar_i] / close[bar_i-N] - 1)，
     按涨幅排序分段赋分：
-      - top 20%  → 6-10 分（线性映射）
-      - 中间 40% → 1-5 分
-      - 底部 40% → 0 分
+      - top 20%  -> 6-10 分（线性映射）
+      - 中间 40% -> 1-5 分
+      - 底部 40% -> 0 分
     若有效样本不足 3 只，返回 None。
 
     使用模块级缓存避免连续相同 bar_i 重复计算。
@@ -1168,11 +1211,11 @@ def _compute_mock_sector_heat(all_data, bar_i, valid_codes, lookback=5, force_re
 
     heat_map = {}
 
-    # 底部 40% → 0 分
+    # 底部 40% -> 0 分
     for code in sorted_codes[top_n + mid_n:]:
         heat_map[code] = 0.0
 
-    # 中间 40% → 1-5 分（线性）
+    # 中间 40% -> 1-5 分（线性）
     mid_start = top_n
     mid_end = top_n + mid_n
     for i, code in enumerate(sorted_codes[mid_start:mid_end]):
@@ -1182,7 +1225,7 @@ def _compute_mock_sector_heat(all_data, bar_i, valid_codes, lookback=5, force_re
             score = 3.0
         heat_map[code] = round(score, 1)
 
-    # 顶部 20% → 6-10 分（线性）
+    # 顶部 20% -> 6-10 分（线性）
     for i, code in enumerate(sorted_codes[:top_n]):
         if top_n > 1:
             score = 6.0 + (i / (top_n - 1)) * 4.0
@@ -1206,9 +1249,17 @@ class BacktestRunner:
     3. 提取结果并输出结构化报告
     """
 
-    def __init__(self, config_path: str = None, strategy: str = 'default'):
+    def __init__(self, config_path: str = None, strategy: str = 'default',
+                 min_score: float = None, min_core: float = None,
+                 max_bias5: float = None, early_stop_days: int = None,
+                 early_stop_loss: float = None):
         self.config_path = config_path
         self.strategy = strategy
+        self.min_score = min_score
+        self.min_core = min_core
+        self.max_bias5 = max_bias5
+        self.early_stop_days = early_stop_days
+        self.early_stop_loss = early_stop_loss
         self._cfg = {}
         self._load_config()
 
@@ -1234,7 +1285,10 @@ class BacktestRunner:
                 for line in f:
                     line = line.strip()
                     if line:
-                        codes.append(line)
+                        raw = line.split('\t')[0].strip()
+                        code6 = _strip_suffix(raw)
+                        suffix = '.SH' if code6.startswith(('6', '9')) else '.SZ'
+                        codes.append(code6 + suffix)
             return codes if codes else ['000001.SZ', '600519.SH']
         except Exception:
             return ['000001.SZ', '600519.SH']
@@ -1260,7 +1314,7 @@ class BacktestRunner:
 
     def run_backtest(self, params: BacktestParams, datasource='xtquant') -> BacktestResult:
         """
-        执行回测。加载数据 → 模拟逐 K线执行 → 计算指标。
+        执行回测。加载数据 -> 模拟逐 K线执行 -> 计算指标。
         """
         global _backtest_state
 
@@ -1335,192 +1389,10 @@ class BacktestRunner:
 
             # 更新当前价格
             state.current_date = date_str.replace('-', '')
+            state.current_bar = bar_i
             state.current_prices = {}
-            for code in valid_codes:
-                df = all_data.get(code)
-                if df is not None and bar_i < len(df):
-                    state.current_prices[code] = float(df['close'].iloc[bar_i])
 
-            # 写入状态文件（供策略的日期变更处理器读取）
-            pos_dict = {c: p['cost'] for c, p in state.positions.items() if p['volume'] > 0}
-            qmt.write_holdings_file(qmt.INTRADAY_HOLD_FILE, pos_dict)
 
-            cumulative_pnl = sum(t['pnl'] for t in state.closed_trades)
-            qmt.write_nav_file(qmt.INTRADAY_NAV_FILE, cumulative_pnl)
-
-            if not init_done:
-                qmt._g_init_done = False
-                runner.init(ctx)
-                init_done = True
-                print("  [板块] 回测模式: 基于近5日涨幅计算模拟板块热度")
-                _compute_mock_sector_heat(None, -1, [], force_refresh=True)  # 清跨回测缓存
-
-            # 模拟板块热度：每根 bar 计算个股近5日涨幅排名
-            # 注：handlebar 内部 _load_data → _run_sector_analysis 因文件不存在
-            # 返回空 dict，且 if bonus_map: 守卫不覆盖已设置的热度图
-            heat_map = _compute_mock_sector_heat(all_data, bar_i, valid_codes)
-            if heat_map and qmt._g_scorer:
-                qmt._g_scorer.update_sector_bonus(heat_map)
-
-            try:
-                runner.handlebar(ctx)
-            except Exception as e:
-                print(f"  [错误] {date_str}: handlebar 异常: {e}", file=sys.stderr)
-                continue
-
-            # 确认待成交订单（策略产生后立即确认）
-            self._confirm_pending(qmt, date_str)
-
-            # 记录净值
-            total = state.cash
-            for code, pos in state.positions.items():
-                total += state.current_prices.get(code, 0) * pos['volume']
-            state.equity_curve.append((date_str, total))
-
-            if (bar_i - first_bar) % 30 == 0 or bar_i == end_idx:
-                print(f"  [{bar_i - first_bar + 1}/{end_idx - first_bar + 1}] {date_str}  "
-                      f"净值={total:,.0f}  现金={state.cash:,.0f}  持仓={len(state.positions)}只")
-
-        # ---- 6. 计算指标 ----
-        print("\n── 计算绩效指标 ──")
-        result = _calc_metrics(state, params, all_dates, all_data)
-        _backtest_state = None
-        return result
-
-    def _patch_qmt_wrapper(self, params, valid_codes, strategy='default'):
-        """Monkey-patch qmt_wrapper 模块使之运行在回测模式。"""
-        # 确保 project root 在 path
-        if PROJECT_ROOT not in sys.path:
-            sys.path.insert(0, PROJECT_ROOT)
-
-        import adapters.qmt_wrapper as qmt
-
-        # 策略选择: 当 strategy == 'qmt37' 时替换信号函数
-        if strategy == 'qmt37':
-            from qmt37_strategy.backtest_adapter import check_buy as qmt37_check_buy
-            qmt.check_buy = qmt37_check_buy
-            print("  [策略] 使用千问3.7版信号")
-        else:
-            import core.signal_main_rise as sig
-
-        # 强制关闭 SAFEMODE —— 配置文件开启了 safemode，但回测中需要真实交易
-        qmt.SAFEMODE_ENABLED = False
-
-        # 回测模式 bypass check_buy：通达信选股已筛过买点，池内的直接进8D评分
-        # 原始流程: pool → check_buy(卡77%) → 评分 → 买入
-        # 修正流程: pool → 评分 → 买入
-        qmt.check_buy = lambda df: (True, "池内(回测模式)", "pool")
-
-        # 打补丁
-        qmt.passorder = _backtest_passorder
-        qmt.get_trade_detail_data = _backtest_get_trade_detail_data
-        qmt.timetag_to_datetime = _backtest_timetag_to_datetime
-
-        # 重定向文件到临时目录
-        tmpdir = tempfile.mkdtemp(prefix='qmt_bt_')
-        for attr in ('INTRADAY_HOLD_FILE', 'ENDOFDAY_HOLD_FILE',
-                     'INTRADAY_NAV_FILE', 'ENDOFDAY_NAV_FILE',
-                     'POOL_PATH', 'POOL_FILE', 'SECTOR_HEAT_FILE',
-                     'TRADE_LOG_FILE', 'INTRADAY_SELL_STATE_FILE',
-                     'SCORE_HISTORY_FILE'):
-            if hasattr(qmt, attr):
-                setattr(qmt, attr, os.path.join(tmpdir, attr.lower() + '.txt'))
-
-        # 写 pool 文件（6位纯代码，_parse_pool_line 的 _code6_to_std 格式）
-        pool_file = os.path.join(tmpdir, 'pool.txt')
-        seen_6 = set()
-        with open(pool_file, 'w', encoding='gbk') as f:
-            for code in valid_codes:
-                code6 = code.split('.')[0].strip()
-                if code6 and code6 not in seen_6:
-                    seen_6.add(code6)
-                    f.write(f"{code6}\t回测\n")
-        qmt.POOL_PATH = pool_file
-        qmt.POOL_FILE = pool_file
-
-        qmt.TEST_MODE = True
-        qmt._load_pool = lambda: [{'code': c, 'buy_type': 'pool', 'signal': '回测'} for c in valid_codes]
-
-        self._bt_tmpdir = tmpdir
-
-    def _confirm_pending(self, qmt, date_str):
-        """确认当日待成交订单。"""
-        state = _backtest_state
-        if not state:
-            return
-
-        for code, info in list(qmt._g_pending_buys.items()):
-            qmt._g_my_codes[code] = info['price']
-            qmt.write_holdings_file(qmt.INTRADAY_HOLD_FILE, qmt._g_my_codes)
-
-        for code, info in list(qmt._g_pending_sells.items()):
-            if qmt._g_sell_engine:
-                qmt._g_sell_engine.confirm_clear(code, date_str)
-                qmt._g_sell_engine.save_state()
-            qmt._g_my_codes.pop(code, None)
-            qmt.write_holdings_file(qmt.INTRADAY_HOLD_FILE, qmt._g_my_codes)
-
-        qmt._g_pending_buys.clear()
-        qmt._g_pending_sells.clear()
-
-    def run_with_params(self, params: BacktestParams, datasource='xtquant') -> BacktestResult:
-        """build + run 一步到位。"""
-        print("=== Step 1: Build 策略 ===")
-        build_ok = self.build_strategy()
-        if not build_ok:
-            print("  [警告] Build 失败，使用当前代码直接回测")
-
-        print("\n=== Step 2: 执行回测 ===")
-        return self.run_backtest(params, datasource=datasource)
-
-    def run_with_data(self, params: BacktestParams, all_data: dict,
-                      all_dates: list[str], datasource='xtquant') -> BacktestResult:
-        """
-        使用已加载的数据运行回测（供测试用）。
-        跳过数据加载步骤。
-        """
-        global _backtest_state
-
-        if not params.stock_codes:
-            return BacktestResult(success=False, error="股票列表为空")
-        if not all_data or not all_dates:
-            return BacktestResult(success=False, error="无可用数据")
-
-        _backtest_state = BacktestState(
-            params.initial_capital, params.slippage,
-            params.commission_rate, params.tax_rate,
-        )
-        state = _backtest_state
-
-        self._patch_qmt_wrapper(params, params.stock_codes, strategy=self.strategy)
-        import adapters.qmt_wrapper as qmt
-
-        start_idx = 0
-        for idx, d in enumerate(all_dates):
-            if d >= params.start_date:
-                start_idx = idx
-                break
-        end_idx = len(all_dates) - 1
-        for idx in range(len(all_dates) - 1, -1, -1):
-            if all_dates[idx] <= params.end_date:
-                end_idx = idx
-                break
-
-        required = qmt.REQUIRED_BARS if hasattr(qmt, 'REQUIRED_BARS') else 120
-        first_bar = max(start_idx, required)
-        if first_bar >= end_idx:
-            _backtest_state = None
-            return BacktestResult(success=False, error="数据不足")
-
-        runner = qmt.StrategyRunner()
-        init_done = False
-
-        for bar_i in range(first_bar, end_idx + 1):
-            date_str = all_dates[bar_i]
-            ctx = BacktestContext(all_data, bar_i, all_dates)
-
-            state.current_date = date_str.replace('-', '')
-            state.current_prices = {}
             for code in params.stock_codes:
                 df = all_data.get(code)
                 if df is not None and bar_i < len(df):
@@ -1562,6 +1434,229 @@ class BacktestRunner:
         _backtest_state = None
         return result
 
+    def _patch_qmt_wrapper(self, params, valid_codes, strategy='default'):
+        if PROJECT_ROOT not in sys.path:
+            sys.path.insert(0, PROJECT_ROOT)
+
+        import adapters.qmt_wrapper as qmt
+
+        if strategy == 'qmt37':
+            from qmt37_strategy.backtest_adapter import check_buy as qmt37_check_buy
+            qmt.check_buy = qmt37_check_buy
+            print("  [策略] 使用千问3.7版信号")
+        else:
+            import core.signal_main_rise as sig
+
+        qmt.SAFEMODE_ENABLED = False
+        qmt.check_buy = lambda df: (True, "池内(回测模式)", "pool")
+
+        if self.max_bias5 is not None:
+            qmt.MAX_BUY_BIAS5 = float(self.max_bias5)
+        if self.min_score is not None or self.min_core is not None or self.max_bias5 is not None:
+            original_run_scoring = qmt._run_scoring
+            min_score = self.min_score
+            min_core = self.min_core
+            max_bias5 = self.max_bias5
+
+            def _run_scoring_filtered(C, candidates, dt):
+                scored = original_run_scoring(C, candidates, dt)
+                filtered = []
+                for s in scored:
+                    code = s['code']
+                    if min_score is not None and s['score'] < min_score:
+                        print("  [分数过滤] %s 总分 %.2f < %.2f，跳过" % (code, s['score'], min_score))
+                        continue
+                    if min_core is not None:
+                        details = s.get('details', {})
+                        core_score = details.get('score_breakout', 0) + details.get('score_trend', 0) + details.get('score_consolidation', 0)
+                        if core_score < min_core:
+                            print("  [核心分过滤] %s 核心分 %.2f < %.2f，跳过" % (code, core_score, min_core))
+                            continue
+                    if max_bias5 is not None:
+                        df = qmt._g_all_data.get(code)
+                        bias5 = qmt._calc_buy_bias5(df)
+                        if bias5 > max_bias5:
+                            print("  [乖离过滤] %s MA5乖离率 %.2f%% > %.2f%%，跳过" % (code, bias5, max_bias5))
+                            continue
+                    filtered.append(s)
+                return filtered
+
+            qmt._run_scoring = _run_scoring_filtered
+
+        if self.early_stop_days is not None and self.early_stop_loss is not None:
+            original_engine = qmt.SellStrategyEngine
+            early_stop_days = int(self.early_stop_days)
+            early_stop_loss = float(self.early_stop_loss)
+
+            class BacktestSellStrategyEngine(original_engine):
+                def _evaluate_position(self, code, df, state, today, rt_price=None):
+                    bt_state = _backtest_state
+                    pos = bt_state.positions.get(code) if bt_state else None
+                    entry_date = pos.get('entry_date') if pos else state.entry_date
+                    if entry_date and state.cost_price > 0:
+                        try:
+                            held_days = (datetime.strptime(today, '%Y%m%d') - datetime.strptime(entry_date, '%Y%m%d')).days
+                            current_price = rt_price if rt_price is not None else float(df['close'].astype(float).iloc[-1])
+                            loss_pct = (current_price - state.cost_price) / state.cost_price
+                            if held_days <= early_stop_days and loss_pct <= early_stop_loss:
+                                return qmt.SellDecision.clear(
+                                    code,
+                                    "早止损:%d日亏损%.1f%%" % (early_stop_days, loss_pct * 100),
+                                    "底线层",
+                                    ["早止损%.1f%%" % (loss_pct * 100)],
+                                )
+                        except Exception:
+                            pass
+                    return super()._evaluate_position(code, df, state, today, rt_price)
+
+            qmt.SellStrategyEngine = BacktestSellStrategyEngine
+
+        qmt.passorder = _backtest_passorder
+        qmt.get_trade_detail_data = _backtest_get_trade_detail_data
+        qmt.timetag_to_datetime = _backtest_timetag_to_datetime
+
+        tmpdir = tempfile.mkdtemp(prefix='qmt_bt_')
+        for attr in ('INTRADAY_HOLD_FILE', 'ENDOFDAY_HOLD_FILE',
+                     'INTRADAY_NAV_FILE', 'ENDOFDAY_NAV_FILE',
+                     'POOL_PATH', 'POOL_FILE', 'SECTOR_HEAT_FILE',
+                     'TRADE_LOG_FILE', 'INTRADAY_SELL_STATE_FILE',
+                     'SCORE_HISTORY_FILE'):
+            if hasattr(qmt, attr):
+                setattr(qmt, attr, os.path.join(tmpdir, attr.lower() + '.txt'))
+
+        pool_file = os.path.join(tmpdir, 'pool.txt')
+        seen_6 = set()
+        with open(pool_file, 'w', encoding='gbk') as f:
+            for code in valid_codes:
+                code6 = code.split('.')[0].strip()
+                if code6 and code6 not in seen_6:
+                    seen_6.add(code6)
+                    f.write("%s\t回测\n" % code6)
+        qmt.POOL_PATH = pool_file
+        qmt.POOL_FILE = pool_file
+
+        qmt.TEST_MODE = True
+        qmt._load_pool = lambda: [{'code': c, 'buy_type': 'pool', 'signal': '回测'} for c in valid_codes]
+        self._bt_tmpdir = tmpdir
+
+    def _confirm_pending(self, qmt, date_str):
+        state = _backtest_state
+        if not state:
+            return
+
+        for code, info in list(qmt._g_pending_buys.items()):
+            qmt._g_my_codes[code] = info['price']
+            qmt.write_holdings_file(qmt.INTRADAY_HOLD_FILE, qmt._g_my_codes)
+
+        today_yyyymmdd = date_str.replace('-', '')
+        for code, info in list(qmt._g_pending_sells.items()):
+            if qmt._g_sell_engine:
+                qmt._g_sell_engine.confirm_clear(code, today_yyyymmdd)
+                qmt._g_sell_engine.save_state()
+            qmt._g_my_codes.pop(code, None)
+            qmt.write_holdings_file(qmt.INTRADAY_HOLD_FILE, qmt._g_my_codes)
+
+        qmt._g_pending_buys.clear()
+        qmt._g_pending_sells.clear()
+
+    def run_with_data(self, params: BacktestParams, all_data: dict,
+                      all_dates: list[str], datasource='xtquant') -> BacktestResult:
+        global _backtest_state
+
+        if not params.stock_codes:
+            return BacktestResult(success=False, error="股票列表为空")
+        if not all_data or not all_dates:
+            return BacktestResult(success=False, error="无可用数据")
+
+        valid_codes = [c for c in params.stock_codes if c in all_data]
+        if not valid_codes:
+            return BacktestResult(success=False, error="所有股票均无数据")
+
+        _backtest_state = BacktestState(
+            params.initial_capital, params.slippage,
+            params.commission_rate, params.tax_rate,
+        )
+        state = _backtest_state
+
+        self._patch_qmt_wrapper(params, valid_codes, strategy=self.strategy)
+        import adapters.qmt_wrapper as qmt
+
+        start_idx = 0
+        for idx, d in enumerate(all_dates):
+            if d >= params.start_date:
+                start_idx = idx
+                break
+
+        end_idx = len(all_dates) - 1
+        for idx in range(len(all_dates) - 1, -1, -1):
+            if all_dates[idx] <= params.end_date:
+                end_idx = idx
+                break
+
+        required = qmt.REQUIRED_BARS if hasattr(qmt, 'REQUIRED_BARS') else 120
+        first_bar = max(start_idx, required)
+        if first_bar >= end_idx:
+            _backtest_state = None
+            return BacktestResult(success=False, error="数据不足")
+
+        runner = qmt.StrategyRunner()
+        init_done = False
+        for bar_i in range(first_bar, end_idx + 1):
+            date_str = all_dates[bar_i]
+            ctx = BacktestContext(all_data, bar_i, all_dates)
+
+            state.current_date = date_str.replace('-', '')
+            state.current_bar = bar_i
+            state.current_prices = {}
+            for code in params.stock_codes:
+                df = all_data.get(code)
+                if df is not None and bar_i < len(df):
+                    state.current_prices[code] = float(df['close'].iloc[bar_i])
+
+            pos_dict = {c: p['cost'] for c, p in state.positions.items() if p['volume'] > 0}
+            qmt.write_holdings_file(qmt.INTRADAY_HOLD_FILE, pos_dict)
+            cumulative_pnl = sum(t['pnl'] for t in state.closed_trades)
+            qmt.write_nav_file(qmt.INTRADAY_NAV_FILE, cumulative_pnl)
+
+            if not init_done:
+                qmt._g_init_done = False
+                try:
+                    runner.init(ctx)
+                except Exception as e:
+                    _backtest_state = None
+                    return BacktestResult(success=False, error=f"StrategyRunner.init 失败: {e}")
+                init_done = True
+                print("  [板块] 回测模式: 基于近5日涨幅计算模拟板块热度")
+                _compute_mock_sector_heat(None, -1, [], force_refresh=True)
+
+            heat_map = _compute_mock_sector_heat(all_data, bar_i, params.stock_codes)
+            if heat_map and qmt._g_scorer:
+                qmt._g_scorer.update_sector_bonus(heat_map)
+
+            try:
+                runner.handlebar(ctx)
+            except Exception:
+                continue
+
+            self._confirm_pending(qmt, date_str)
+            total = state.cash
+            for code, pos in state.positions.items():
+                total += state.current_prices.get(code, 0) * pos['volume']
+            state.equity_curve.append((date_str, total))
+
+        result = _calc_metrics(state, params, all_dates, all_data)
+        _backtest_state = None
+        return result
+
+    def run_with_params(self, params: BacktestParams, datasource='xtquant') -> BacktestResult:
+        print("=== Step 1: Build 策略 ===")
+        build_ok = self.build_strategy()
+        if not build_ok:
+            print("  [警告] Build 失败，使用当前代码直接回测")
+
+        print("\n=== Step 2: 执行回测 ===")
+        return self.run_backtest(params, datasource=datasource)
+
 
 # ============================================================
 #  CLI
@@ -1602,6 +1697,16 @@ def _parse_cli():
     p.add_argument('--strategy', type=str, default='default',
                    choices=['default', 'qmt37'],
                    help='策略选择: default(现有策略), qmt37(千问3.7版)')
+    p.add_argument('--min-score', type=float,
+                   help='回测实验：最低6+2总分过滤')
+    p.add_argument('--min-core', type=float,
+                   help='回测实验：最低核心分(突破+趋势+回踩)过滤')
+    p.add_argument('--max-bias5', type=float,
+                   help='回测实验：最高MA5乖离率过滤')
+    p.add_argument('--early-stop-days', type=int,
+                   help='回测实验：入场后N日内启用早止损')
+    p.add_argument('--early-stop-loss', type=float,
+                   help='回测实验：早止损亏损阈值，小数格式如 -0.045')
     return p.parse_args()
 
 
@@ -1655,11 +1760,25 @@ def main():
         print(f"  候选池: {len(candidates)} 只股票")
 
     if not params.stock_codes:
-        runner = BacktestRunner()
+        runner = BacktestRunner(
+            strategy=args.strategy,
+            min_score=args.min_score,
+            min_core=args.min_core,
+            max_bias5=args.max_bias5,
+            early_stop_days=args.early_stop_days,
+            early_stop_loss=args.early_stop_loss,
+        )
         params.stock_codes = runner._default_stocks()
 
     # 执行
-    runner = BacktestRunner(strategy=args.strategy)
+    runner = BacktestRunner(
+        strategy=args.strategy,
+        min_score=args.min_score,
+        min_core=args.min_core,
+        max_bias5=args.max_bias5,
+        early_stop_days=args.early_stop_days,
+        early_stop_loss=args.early_stop_loss,
+    )
     result = runner.run_with_params(params, datasource=args.datasource)
 
     # 输出
