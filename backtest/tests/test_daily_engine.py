@@ -257,9 +257,10 @@ def test_diagnostics_aggregate_keys():
     assert da["unfilled_order_count"] >= 0
     ss = da["strategy_specific"]
     assert set(ss.keys()) == {"ima_uptrend_v31"}
-    assert set(ss["ima_uptrend_v31"].keys()) == {
-        "filter_counts_avg_per_day", "trigger_counts_total",
-    }
+    ima_keys = set(ss["ima_uptrend_v31"].keys())
+    # 必含的两个聚合 key，scores_present 等占位 key 允许新增不限定
+    assert "filter_counts_avg_per_day" in ima_keys
+    assert "trigger_counts_total"      in ima_keys
 
 
 def test_no_io_writes_to_workspace(tmp_path, monkeypatch):
@@ -320,3 +321,40 @@ def test_no_lookahead_window_leaks_future_dates():
 
     for cur, code, max_d in seen:
         assert max_d <= cur, "window leaked future date %s on day %s for %s" % (max_d, cur, code)
+
+
+def test_diagnostics_aggregate_namespace_generic():
+    """v0.4 通用聚合：非 6+2 策略的 strategy_specific 应被自动聚合，
+    不再硬编码读 ima_uptrend_v31。"""
+    from backtest.strategies import get_strategy
+    fn = get_strategy("research/example_ma_cross")
+
+    closes = [10.0] * 10 + [20.0]
+    dates  = ["2025-09-%02d" % (i + 1) for i in range(11)]
+    df = pd.DataFrame({
+        "date":  dates,
+        "open":  closes, "high": closes, "low": closes, "close": closes,
+        "vol":   [100] * 11, "amount": [1000.0] * 11,
+    })
+    market = {"000001.SZ": df}
+
+    reader = FakeReader(market, dates)
+    universe = ["000001.SZ"]
+
+    result = run_backtest(
+        reader=reader, universe=universe,
+        start_date=dates[0], end_date=dates[-1],
+        strategy_config={"max_positions": 5}, execution_cfg=_EXEC,
+        initial_cash=1_000_000.0, universe_hash="u", config_hash="c",
+        strategy_name="research/example_ma_cross",
+        trading_model="next_open",
+    )
+
+    da = result["summary"]["diagnostics_aggregate"]
+    ss = da["strategy_specific"]
+    assert "example_ma_cross" in ss, (
+        "example_ma_cross namespace 应被自动聚合，实际 keys=" + str(list(ss.keys()))
+    )
+    ex_keys = set(ss["example_ma_cross"].keys())
+    assert "signal_counts_avg_per_day"  in ex_keys
+    assert "blocked_counts_avg_per_day" in ex_keys

@@ -159,6 +159,63 @@ def _unique_warnings(daily_warnings):
     return seen
 
 
+def _aggregate_strategy_specific(daily_ss, n_days):
+    """v0.4 通用 strategy_specific 聚合 —— SPEC §3.3。
+
+    输入: daily_ss = [{strategy_name: {key: dict_or_list}}, ...] 每天一份
+    输出: {strategy_name: {key + "_avg_per_day"_or_"_total": aggregated_value}}
+
+    聚合规则（按值类型分两类）：
+      - dict[str, number]   → 求和后除以 n_days；输出 key 加 "_avg_per_day" 后缀
+      - dict[str, dict]     → 不聚合，保留每个内层 dict 的 union（即 scores 等"按 code 索引"的结构）
+    """
+    if n_days <= 0:
+        return {}
+    by_strat = {}   # {strategy_name: {sub_key: type_hint}}
+    for ss in daily_ss:
+        if not isinstance(ss, dict):
+            continue
+        for sname, sdict in ss.items():
+            if not isinstance(sdict, dict):
+                continue
+            sub_map = by_strat.setdefault(sname, {})
+            for sub_key, sub_val in sdict.items():
+                sub_map.setdefault(sub_key, sub_val)
+
+    out = {}
+    for sname, sub_map in by_strat.items():
+        sname_out = {}
+        for sub_key, sample_val in sub_map.items():
+            if isinstance(sample_val, dict) and sample_val and all(
+                isinstance(v, (int, float)) for v in sample_val.values()
+            ):
+                agg = {}
+                inner_keys = set()
+                for ss in daily_ss:
+                    sd = (ss or {}).get(sname, {}) or {}
+                    sk = sd.get(sub_key, {}) or {}
+                    if isinstance(sk, dict):
+                        inner_keys.update(sk.keys())
+                for ik in inner_keys:
+                    total = 0.0
+                    for ss in daily_ss:
+                        sd = (ss or {}).get(sname, {}) or {}
+                        sk = sd.get(sub_key, {}) or {}
+                        if isinstance(sk, dict):
+                            total += float(sk.get(ik, 0) or 0)
+                    agg[ik] = round(total / float(n_days), 6)
+                if sub_key == "trigger_counts":
+                    sname_out["trigger_counts_total"] = {
+                        k: int(round(v * n_days)) for k, v in agg.items()
+                    }
+                else:
+                    sname_out[sub_key + "_avg_per_day"] = agg
+            else:
+                sname_out[sub_key + "_present"] = True
+        out[sname] = sname_out
+    return out
+
+
 def resolve_strategy(strategy_name, trading_model):
     """v0.4 Strategy Registry: 取策略 evaluate_fn + 校验 trading_model。
 
@@ -278,6 +335,7 @@ def run_backtest(
     daily_warnings = []
     daily_candidate_total = []
     daily_candidate_passed = []
+    daily_strategy_specific = []   # list[dict] — 每天一份 strategy_specific 整体（任意 namespace）
     unfilled_order_count = 0
 
     pending = None
@@ -366,15 +424,17 @@ def run_backtest(
                 aux_data=aux_for_eval,
             )
             diag = decision.get("diagnostics", {})
-            # v0.4: 通用 vs 私有字段分别取
+            # v0.4 通用字段
             daily_warnings.append(diag.get("warnings", []))
             daily_candidate_total.append(int(diag.get("candidate_total", 0)))
             daily_candidate_passed.append(int(diag.get("candidate_passed", 0)))
-            # 6+2 私有字段走 strategy_specific.{name}.* 路径
-            from backtest.strategies import get_strategy_diag as _gsd
-            _sname = "production/ima_uptrend_v31"
-            daily_filter_counts.append(_gsd(decision, _sname, "filter_counts", {}) or {})
-            daily_trigger_counts.append(_gsd(decision, _sname, "trigger_counts", {}) or {})
+            # v0.4 策略私有字段：按 namespace 整体采集，支持任意策略
+            ss_today = diag.get("strategy_specific", {}) or {}
+            daily_strategy_specific.append(ss_today)
+            # 兼容旧 6+2 通路（被某些测试 fixture 引用）：从 ima_uptrend_v31 namespace 提取
+            _ima = ss_today.get("ima_uptrend_v31", {}) or {}
+            daily_filter_counts.append(_ima.get("filter_counts", {}) or {})
+            daily_trigger_counts.append(_ima.get("trigger_counts", {}) or {})
             for line in decision.get("logs", []):
                 daily_logs.append("[INFO]  " + line)
             pending = decision
@@ -428,23 +488,20 @@ def run_backtest(
                 benchmark_note = u"benchmark 起点价格为 0，禁用 IR/excess"
 
     # ----- Aggregate diagnostics -----
-    # v0.4: 聚合按 SPEC §3.3 分通用 / 策略私有
+    # v0.4: 聚合按 SPEC §3.3 分通用 / 策略私有；策略私有自动支持任意 namespace
     _n_days = max(1, n_days)
     _ct_avg = sum(daily_candidate_total)  / float(_n_days)
     _cp_avg = sum(daily_candidate_passed) / float(_n_days)
     diagnostics_aggregate = {
         # 通用
-        "warnings_unique":             _unique_warnings(daily_warnings),
+        "warnings_unique":              _unique_warnings(daily_warnings),
         "candidate_total_avg_per_day":  _ct_avg,
         "candidate_passed_avg_per_day": _cp_avg,
         "unfilled_order_count":         int(unfilled_order_count),
-        # 策略私有
-        "strategy_specific": {
-            "ima_uptrend_v31": {
-                "filter_counts_avg_per_day": _avg_filter_counts(daily_filter_counts, n_days),
-                "trigger_counts_total":      _sum_trigger_counts(daily_trigger_counts),
-            },
-        },
+        # 策略私有：遍历所有出现过的 namespace 自动聚合
+        "strategy_specific": _aggregate_strategy_specific(
+            daily_strategy_specific, _n_days
+        ),
     }
 
     # ----- Performance -----
