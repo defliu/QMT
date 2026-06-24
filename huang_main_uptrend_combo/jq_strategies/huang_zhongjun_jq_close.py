@@ -70,7 +70,9 @@ def initialize(context):
     log.info("=" * 60)
     set_benchmark('000001.XSHG')
     set_option('use_real_price', True)
-    set_option('avoid_future_data', True)
+    # avoid_future_data=False: 14:55 决策需要看到当日 close (与实盘等价).
+    # 聚宽默认 True 会把 14:55 取 close 视为未来数据拒绝, 导致 zhongjun 全程 0 触发.
+    set_option('avoid_future_data', False)
     set_slippage(FixedSlippage(0.02))
     set_order_cost(OrderCost(
         close_tax=0.001,

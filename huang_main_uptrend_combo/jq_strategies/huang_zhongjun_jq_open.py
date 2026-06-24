@@ -70,7 +70,13 @@ def initialize(context):
     log.info("=" * 60)
     set_benchmark('000001.XSHG')
     set_option('use_real_price', True)
-    set_option('avoid_future_data', True)
+    # avoid_future_data=False: 10:00 决策需要看到当日 open (与实盘等价).
+    # 聚宽默认 True 会把盘中取价视为未来数据拒绝.
+    # 注意盘中版本意上 10:00 时只应看 T 日 open + T-1 close, 不应看 T 日 close;
+    # 但聚宽 get_price 频率='1d' 时返回的是日 K (含 close), avoid_future_data=False
+    # 后 10:00 取的 close 实际值取决于聚宽行为, 不保证严格"盘中只见 open".
+    # 平台对比仅供参考.
+    set_option('avoid_future_data', False)
     set_slippage(FixedSlippage(0.02))
     set_order_cost(OrderCost(
         close_tax=0.001,
