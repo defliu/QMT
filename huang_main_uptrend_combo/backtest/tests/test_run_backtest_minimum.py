@@ -26,6 +26,10 @@ class TestRunBacktestMinimum(unittest.TestCase):
                 out_root=out_root,
                 hold_periods='5,10,20',
                 signal_source='combo_XG',
+                engine='hold_periods',
+                entry_timing='close',
+                max_positions=3,
+                initial_cash=1000000.0,
             )
             summary = run_backtest(args)
             self.assertIn('run_id', summary)
