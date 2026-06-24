@@ -42,7 +42,7 @@
 - ❌ 事件研究范式（event_study）
 - ❌ 因子 IC 范式（factor_ic）
 - ❌ 多 paradigm 抽象层
-- ❌ 通用 trading_model 引擎抽象（本阶段仍只支持 `next_open`，但接口预留）
+- ❌ 通用 trading_model 引擎抽象 —— **永久不做**。工厂只提供 `next_open` 单一日 K 撮合，撮合时点决策属于策略代码内部职责（与 QMT 实盘 passorder 调用时机一致语义）。`ALLOWED_TRADING_MODELS` hook 保留作零成本对称声明，实际只取 `["next_open"]`。详见 §九。
 - ❌ 自动迁移全部 15 个旧 yaml（只迁 baseline 1 个做样本，其余按需手动迁）
 - ❌ 重写 6+2 任何逻辑
 - ❌ 改 6+2 的字段语义
@@ -514,8 +514,12 @@ Phase 2+ 候选（仅记录方向，不开发）：
 | factor_ic 范式 | 因子库扩展时 |
 | 多 paradigm engine 抽象 | 至少两个范式并存时 |
 | yaml-DSL 策略 | RS 三问答案倾向 yaml |
-| trading_model 引擎扩展 | 出现 next_open 之外的真实需求 |
 | 策略热加载 | 当注册策略 > 10 个时 |
+
+**已剔除候选（2026-06-24 拍板）**：
+
+- ~~trading_model 引擎扩展~~ —— 撮合时点是**策略代码内部职责**，与 QMT 实盘 passorder 调用时机一致。工厂永远只提供 `next_open`（信号 @ T 收盘 → 成交 @ T+1 开盘）作为唯一日 K 撮合假设；策略要别的时点（尾盘 / 当日 open / VWAP），自己在 evaluate_day 里按 `bar["close"]` / `bar["open"]` / 自定义算法决定目标价。
+  - `ALLOWED_TRADING_MODELS` hook 保留，但实际只会取值 `["next_open"]`，作为零成本对称声明。
 
 Phase 1 完成且稳定运行后再讨论。
 
