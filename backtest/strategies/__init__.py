@@ -48,3 +48,5 @@ def get_strategy_diag(decision, strategy_name, key, default=None):
 
 # 触发注册：import 子包即可
 from backtest.strategies.production import ima_uptrend_v31  # noqa: F401
+# Research strategies（按需逐个 import）
+from backtest.strategies.research import example_ma_cross  # noqa: F401

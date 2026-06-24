@@ -1,0 +1,32 @@
+# coding: utf-8
+# Example: research/example_ma_cross strategy on baseline universe & dates
+# 5/10 均线金叉 minimal example —— 工厂演示价值，不是策略价值
+# SPEC: specs/SPEC_BACKTEST_FACTORY_V0.4_GENERALIZATION_PHASE1.md
+
+strategy_name: research/example_ma_cross
+trading_model: next_open
+
+backtest:
+  name: example_ma_cross
+  start_date: "2025-09-02"
+  end_date:   "2025-09-26"
+  initial_cash: 1000000.0
+  benchmark_code: null
+
+data:
+  source: jince_zhisuan
+  path:   "E:/金策智算/_internal/databases/duckdb/quantifydata.duckdb"
+  adjustment: hfq
+
+universe:
+  csv: "backtest/data/universe/strategy_pool_base.csv"
+
+execution:
+  price: next_open
+  slippage: 0.001
+  commission_rate: 0.00025
+  tax_rate: 0.0001
+
+# example 策略只读 max_positions，其他字段忽略即可
+strategy:
+  max_positions: 5
