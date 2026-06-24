@@ -50,3 +50,4 @@ def get_strategy_diag(decision, strategy_name, key, default=None):
 from backtest.strategies.production import ima_uptrend_v31  # noqa: F401
 # Research strategies（按需逐个 import）
 from backtest.strategies.research import example_ma_cross  # noqa: F401
+from backtest.strategies.research import huang_zhongjun_combo  # noqa: F401

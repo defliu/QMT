@@ -1,0 +1,47 @@
+# coding: utf-8
+# 黄氏 zhongjun + 6+2 + V1.1 无状态版 smoke 配置（短样本）
+# is_short_sample=true，仅用于工程链路验证，不可作策略结论。
+strategy_name: research/huang_zhongjun_combo
+trading_model: next_open
+
+backtest:
+  name: huang_zhongjun_combo_smoke
+  start_date: "2025-09-02"
+  end_date:   "2025-12-31"
+  initial_cash: 1000000.0
+  benchmark_code: "000001.SH"
+  benchmark_db_path: "F:/backtest_workspace/data/duckdb/benchmark_index.duckdb"
+
+data:
+  source: jince_zhisuan
+  path:   "E:/金策智算/_internal/databases/duckdb/quantifydata.duckdb"
+  adjustment: hfq
+
+universe:
+  csv: "backtest/data/universe/huang_small_mid_20260403.csv"
+
+execution:
+  price: next_open
+  slippage: 0.001
+  commission_rate: 0.00025
+  tax_rate: 0.0001
+
+strategy:
+  # 持仓上限
+  max_positions: 3
+  rebalance_policy: daily
+  # 6+2 评分过滤
+  min_score: 60.0
+  min_core:  32.0
+  max_bias5: 10.0
+  max_daily_pct: 9.0
+  sector_heat_mode: zero
+  # 换仓禁用（黄氏顶仓不换）
+  score_gap_threshold: 999.0
+  # V1.1 无状态触发器
+  early_stop_days: 3
+  early_stop_loss: -0.05
+  stop_loss: -0.08
+  warning_score_threshold: 50.0
+  early_stop_holding_days: 5
+  early_stop_min_return: 0.03
