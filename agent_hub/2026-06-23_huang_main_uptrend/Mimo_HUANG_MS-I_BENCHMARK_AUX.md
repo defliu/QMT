@@ -325,36 +325,70 @@ git log -1 --stat HEAD
 
 ## 完成回执
 
-**执行时间**: <真实 date -u 输出>
-**MIMO 模型**: <实际名>
+**执行时间**: 2026-06-24T13:10:55Z
+**MIMO 模型**: mimo-auto
 
 ### TASK-0: 真实时间戳
+`2026-06-24T13:10:55Z`
+
 ### TASK-1: 预检
-<贴 git status / git log -1 输出>
+```
+$ git status --short backtest/engine/daily_engine.py
+(no output)
+
+$ git log -1 --oneline backtest/engine/daily_engine.py
+6b37105 [MS-G] fix(backtest/v0.4): daily_engine diagnostics 聚合 namespace 通用化
+```
+✓ daily_engine.py 干净，最近 commit 为 6b37105
 
 ### TASK-2: daily_engine.py 修改
-<贴 git diff 的关键 hunk>
+```diff
+     if "trading_calendar" not in aux_for_eval or not aux_for_eval.get("trading_calendar"):
+         aux_for_eval = dict(aux_for_eval)
+         aux_for_eval["trading_calendar"] = calendar
++    # MS-I: 暴露 benchmark close 序列给 evaluate_day（zhongjun 等策略大盘条件依赖）。
++    # benchmark_closes 是 forward-filled dict {date_str: close}，evaluate_day 自己切窗口。
++    # 未启用 benchmark 时 (benchmark_code=null 或加载失败) 该 key 为 None。
++    if "benchmark_closes" not in aux_for_eval:
++        aux_for_eval = dict(aux_for_eval)
++        aux_for_eval["benchmark_closes"] = benchmark_closes
++        aux_for_eval["benchmark_code"] = benchmark_code
+
+     # P2.1 PIT: pre-compute per-day universe from snapshots
+```
 
 ### TASK-3: test_aux_data_benchmark.py
-<贴文件 LOC + 说明用了哪种测试桩方案>
+- LOC: 142 行
+- 测试桩方案: `_FakeReader` + `_build_simple_market` + `register_strategy("_spy/benchmark_test")` spy 装饰器抓 aux_data，直接调 `daily_engine.run_backtest`，不走 yaml
 
 ### TASK-4: 测试结果
-<贴 pytest 输出 + 全量统计>
-- 新测试: <PASS/FAIL 数>
-- 全量: <passed/failed/warnings 数>
-- warning 类型: <分类汇总，遵循 feedback-report-warning-categories>
+```
+backtest/tests/test_aux_data_benchmark.py::test_aux_data_has_benchmark_keys_when_disabled PASSED
+backtest/tests/test_aux_data_benchmark.py::test_trading_calendar_still_present_regression PASSED
+2 passed in 1.21s
+```
+全量: `273 passed, 14 warnings in 10.35s`
+- 新测试: 2 PASS / 0 FAIL
+- 全量: 273 passed / 0 failed / 14 warnings
+- warning 类型: 14 个 DeprecationWarning（`backtest.strategy_core.interface.evaluate_day is deprecated`）
 
 ### TASK-5: git diff + commit
-<贴 3 行 + git log -1 --stat>
+```
+3 files changed, 509 insertions(+)
+ agent_hub/.../Mimo_HUANG_MS-I_BENCHMARK_AUX.md  | 360 +++++++++++++++++++++
+ backtest/engine/daily_engine.py                 |   7 +
+ backtest/tests/test_aux_data_benchmark.py       | 142 ++++++++
+```
+commit `4253605` [MS-I] feat(backtest/v0.4): daily_engine 注入 benchmark_closes 到 aux_data
 
 ### 自检
-- [ ] 时间戳真跑 date
-- [ ] daily_engine.py 仅追加，未替换 trading_calendar 块
-- [ ] _load_benchmark_series / equity_rows 未改
-- [ ] strategy_core / strategies/ 任何文件未改
-- [ ] 新测试 PASS
-- [ ] 全量 0 failed
-- [ ] staged 恰好 3 个文件
-- [ ] commit 成功
-- [ ] 回执在 EOF 追加
+- [x] 时间戳真跑 date
+- [x] daily_engine.py 仅追加，未替换 trading_calendar 块
+- [x] _load_benchmark_series / equity_rows 未改
+- [x] strategy_core / strategies/ 任何文件未改
+- [x] 新测试 PASS
+- [x] 全量 0 failed
+- [x] staged 恰好 3 个文件
+- [x] commit 成功
+- [x] 回执在 EOF 追加
 ```
