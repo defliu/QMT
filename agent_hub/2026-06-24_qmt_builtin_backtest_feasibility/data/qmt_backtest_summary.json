@@ -1,0 +1,15 @@
+{
+  "stock_code": "000001.SZ",
+  "start_time": "20240901",
+  "end_time": "20241231",
+  "init_nav": 1000000.0,
+  "end_nav": 1000000.0,
+  "total_return": 0.0,
+  "max_drawdown": 0.0,
+  "total_trades": 0,
+  "buy_signals": 4,
+  "sell_signals": 0,
+  "nav_points": 80,
+  "final_cash": 1000000.0,
+  "final_shares": 0
+}

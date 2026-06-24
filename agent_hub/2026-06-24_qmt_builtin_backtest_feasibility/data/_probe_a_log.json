@@ -1,0 +1,11 @@
+{
+  "init_called": true,
+  "after_init_called": true,
+  "handlebar_count": 426,
+  "stop_called": true,
+  "first_bar_time": 1724256000000,
+  "last_bar_time": 1780243200000,
+  "error": null,
+  "init_ts": 1782307308.258248,
+  "stop_ts": 1782307308.3726325
+}
