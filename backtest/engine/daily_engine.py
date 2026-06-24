@@ -40,6 +40,11 @@ _SUMMARY_SCHEMA_VERSION = "0.2"
 
 DEFAULT_BENCHMARK_DB = "F:/backtest_workspace/data/duckdb/benchmark_index.duckdb"
 
+# MS-J: benchmark 序列往前多取 N 个自然日的 lead-in，让策略侧 evaluate_day
+# 拿到的 bench 序列足以算 MA60 / MA120 等长窗口指标。
+# 120 天 ≈ 6 个月日 K，覆盖黄氏 MA120 + 留 30 天余量。
+_BENCHMARK_LEAD_IN_DAYS = 120
+
 
 def _load_benchmark_series(benchmark_code, calendar, benchmark_db_path):
     """Load benchmark closes aligned to the run calendar (forward-fill on gaps).
@@ -54,13 +59,22 @@ def _load_benchmark_series(benchmark_code, calendar, benchmark_db_path):
         return None, u"benchmark_db_path 未配置"
     if not os.path.isfile(benchmark_db_path):
         return None, u"benchmark_index.duckdb 不存在: %s" % benchmark_db_path
+    # MS-J: 往前推 _BENCHMARK_LEAD_IN_DAYS 自然日, 让策略侧拿到足够 lead-in
+    # 算 MA60/MA120 等长窗口指标 (HUANG-ZJ-V04 smoke 0 成交 root cause)。
+    import datetime as _dt2
+    try:
+        _cal0 = _dt2.datetime.strptime(calendar[0], "%Y-%m-%d").date()
+    except Exception:
+        _cal0 = None
+    if _cal0 is not None:
+        _bench_start = (_cal0 - _dt2.timedelta(days=_BENCHMARK_LEAD_IN_DAYS)).strftime("%Y-%m-%d")
+    else:
+        _bench_start = calendar[0]
     try:
         from backtest.data_tools.benchmark_reader import BenchmarkIndexReader
         br = BenchmarkIndexReader(benchmark_db_path)
         try:
-            # Pull a small lead-in window so we can forward-fill the first day
-            # if the calendar's first date predates the first benchmark bar.
-            rows = br.load_series(benchmark_code, calendar[0], calendar[-1])
+            rows = br.load_series(benchmark_code, _bench_start, calendar[-1])
         finally:
             br.close()
     except Exception as e:
@@ -71,16 +85,21 @@ def _load_benchmark_series(benchmark_code, calendar, benchmark_db_path):
     if not bm_map:
         return None, u"benchmark close 全为空 code=%s" % benchmark_code
     bm_dates_sorted = sorted(bm_map.keys())
+    # MS-J: 先把 lead-in 的 bm_map 数据全塞进 closes (key 是真实交易日),
+    # 让策略侧 evaluate_day 切片 d<=current_date 时能拿到历史 lead-in。
+    # equity_curve 路径只查 calendar 内的 key, 对 extra lead-in key 透明。
+    closes = {}
+    for bd in bm_dates_sorted:
+        closes[bd] = bm_map[bd]
     # Forward-fill onto the run calendar. Days before the first benchmark
     # row are left out of closes_by_date; the engine will treat them as gaps.
-    closes = {}
     last = None
     bi = 0
     for d in calendar:
         while bi < len(bm_dates_sorted) and bm_dates_sorted[bi] <= d:
             last = bm_map[bm_dates_sorted[bi]]
             bi += 1
-        if last is not None:
+        if last is not None and d not in closes:
             closes[d] = last
     if not closes:
         return None, (u"benchmark 起点晚于回测窗口 (首条=%s)" % bm_dates_sorted[0])
