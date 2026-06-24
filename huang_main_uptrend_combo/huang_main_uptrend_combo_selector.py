@@ -42,6 +42,9 @@ DEFAULT_PARAMS = {
     'benchmark_code': '000001.SH',
     # SPEC v1.2 §C: 时间窗口串联 (废弃同日 AND)
     'box_window_N': 120,  # 最近 N 个交易日内曾触发 box_breakout_XG; 默认 120 (诚哥拍板)
+    # 505 版主升浪选股参数 (v1)
+    'h505_ma_n': 5, 'h505_ma_n1': 10, 'h505_ma_n2': 20, 'h505_ma_n3': 60,
+    'h505_angle_thresh': 45.0,
 }
 
 
@@ -246,6 +249,68 @@ def _calc_double_zhongjun_conditions(df, index_df, params):
     return out
 
 
+def _calc_huang_505_conditions(df, params):
+    """黄氏 505 版主升浪选股条件 (v1: 已砍 SCR.SCR / WINNER 筹码条件).
+
+    TDX 公式来源: knowledge_base/20_策略知识库/黄氏主升浪策略.txt #505版
+    复刻范围: 买点1 主体 (均线多头 + C>O + L>=MA5*0.98 + 角度>=45)
+    已降级:    SCR.SCR / WINNER (筹码集中 / 获利盘) -> 强制 True
+    已忽略:    启用过滤=0 故过滤条件恒为 1 (大盘股/大盘OK 不参与)
+    已合并:    BIAS5 仅作 diagnostic, 不参与 XG
+
+    Args:
+        df: DataFrame[open,high,low,close,volume,...], 升序
+        params: dict, 沿用 DEFAULT_PARAMS + 505 专属字段
+
+    Returns:
+        DataFrame 索引同 df, 包含:
+          huang505_MA5, huang505_MA10, huang505_MA20, huang505_MA60,
+          huang505_角度, huang505_BIAS5,
+          huang505_多头排列_ok, huang505_阳线_ok, huang505_站稳MA5_ok, huang505_角度_ok,
+          huang505_chip_v1_降级标记 (固定 True),
+          huang505_XG  (v1 最终选股信号)
+    """
+    out = _pd.DataFrame(index=df.index)
+
+    # 1. 均线
+    MA5 = tdx_ma(df['close'], params.get('h505_ma_n', 5))
+    MA10 = tdx_ma(df['close'], params.get('h505_ma_n1', 10))
+    MA20 = tdx_ma(df['close'], params.get('h505_ma_n2', 20))
+    MA60 = tdx_ma(df['close'], params.get('h505_ma_n3', 60))
+    out['huang505_MA5'] = MA5
+    out['huang505_MA10'] = MA10
+    out['huang505_MA20'] = MA20
+    out['huang505_MA60'] = MA60
+
+    # 2. 角度 (TDX 原式: ATAN((MA5/REF(MA5,1)-1)*100)*180/π)
+    angle_pct = (MA5 / tdx_ref(MA5, 1) - 1.0) * 100.0
+    angle_deg = _np.degrees(_np.arctan(angle_pct))
+    out['huang505_角度'] = angle_deg
+
+    # 3. BIAS5 (TDX 原式: (C-MA5)/MA5*100) - 仅 diagnostic
+    out['huang505_BIAS5'] = (df['close'] - MA5) / MA5 * 100.0
+
+    # 4. 子条件
+    out['huang505_多头排列_ok'] = (
+        (df['close'] > MA5) & (MA5 > MA10) & (MA10 > MA20) & (MA20 > MA60)
+    ).fillna(False)
+    out['huang505_阳线_ok'] = (df['close'] > df['open']).fillna(False)
+    out['huang505_站稳MA5_ok'] = (df['low'] >= MA5 * 0.98).fillna(False)
+    out['huang505_角度_ok'] = (angle_deg >= params.get('h505_angle_thresh', 45.0)).fillna(False)
+
+    # v1: 筹码降级标记 (强制 True)
+    out['huang505_chip_v1_降级标记'] = True
+
+    # 5. 最终 XG (v1)
+    out['huang505_XG'] = (
+        out['huang505_多头排列_ok']
+        & out['huang505_阳线_ok']
+        & out['huang505_站稳MA5_ok']
+        & out['huang505_角度_ok']
+    )
+    return out
+
+
 def select_huang_main_uptrend_combo(data, index_data, params=None):
     """主入口: 组合选股.
 
@@ -278,6 +343,10 @@ def select_huang_main_uptrend_combo(data, index_data, params=None):
         box = _calc_box_breakout_conditions(df, p)
         dbl = _calc_double_zhongjun_conditions(df, index_data, p)
         merged = _pd.concat([box, dbl], axis=1)
+
+        # 505 版条件 (与 zhongjun / box 独立, 不参与 combo_XG)
+        h505 = _calc_huang_505_conditions(df, p)
+        merged = _pd.concat([merged, h505], axis=1)
 
         # SPEC v1.2 §C: 时间窗口串联
         # 1) box_window_hit: 最近 N 个交易日内曾触发 box_breakout_XG
