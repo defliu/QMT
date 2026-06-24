@@ -9,7 +9,7 @@
 ## 文件
 
 - `huang_zhongjun_jq_close.py`: 尾盘版 (14:55 决策 + 14:55 撮合)
-- `huang_zhongjun_jq_open.py`: 盘中版 (10:00 决策 + 10:00 撮合) — Part-JQ-B 生成
+- `huang_zhongjun_jq_open.py`: 盘中版 (10:00 决策 + 10:00 撮合)
 
 ## 使用方法
 
