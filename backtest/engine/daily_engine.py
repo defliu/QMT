@@ -309,6 +309,13 @@ def run_backtest(
     if "trading_calendar" not in aux_for_eval or not aux_for_eval.get("trading_calendar"):
         aux_for_eval = dict(aux_for_eval)
         aux_for_eval["trading_calendar"] = calendar
+    # MS-I: 暴露 benchmark close 序列给 evaluate_day（zhongjun 等策略大盘条件依赖）。
+    # benchmark_closes 是 forward-filled dict {date_str: close}，evaluate_day 自己切窗口。
+    # 未启用 benchmark 时 (benchmark_code=null 或加载失败) 该 key 为 None。
+    if "benchmark_closes" not in aux_for_eval:
+        aux_for_eval = dict(aux_for_eval)
+        aux_for_eval["benchmark_closes"] = benchmark_closes
+        aux_for_eval["benchmark_code"] = benchmark_code
 
     # P2.1 PIT: pre-compute per-day universe from snapshots (forward-fill).
     # universe_by_date maps as_of -> [codes]; for each calendar day pick the latest
