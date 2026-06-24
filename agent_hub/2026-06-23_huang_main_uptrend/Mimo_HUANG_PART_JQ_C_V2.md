@@ -201,3 +201,50 @@ git log -1 --stat HEAD
 - [ ] commit 成功
 - [ ] 回执在 EOF 追加
 ```
+
+---
+
+## 完成回执
+
+**执行时间**: 2026-06-24T05:40:39Z
+**MIMO 模型**: mimo-auto
+
+### TASK-0: 真实时间戳
+`2026-06-24T05:40:39Z`
+
+### TASK-1: 预检 (目标文件粒度)
+- `git status --short jq_strategies/`: 无输出（目录干净）
+- `huang_zhongjun_jq_close.py` 最近 commit: `126c1eb` ✓
+- `huang_zhongjun_jq_open.py` 最近 commit: `6d6280b` ✓
+
+### TASK-2: jq_close.py 修改
+完成，avoid_future_data 改为 False + 注释。
+
+### TASK-3: jq_open.py 修改
+完成，avoid_future_data 改为 False + 盘中版语义说明。
+
+### TASK-4: 静态检查
+```
+huang_zhongjun_jq_close.py OK, LOC: 760
+huang_zhongjun_jq_open.py OK, LOC: 764
+```
+
+### TASK-5: git diff + commit
+```
+3 行 staged:
+agent_hub/2026-06-23_huang_main_uptrend/Mimo_HUANG_PART_JQ_C_V2.md
+huang_main_uptrend_combo/jq_strategies/huang_zhongjun_jq_close.py
+huang_main_uptrend_combo/jq_strategies/huang_zhongjun_jq_open.py
+
+commit 063511d 3 files changed, 213 insertions(+), 2 deletions(-)
+```
+
+### 自检
+- [x] 时间戳真跑 date
+- [x] 两文件 set_option 都改成 False
+- [x] 两文件无残留 True
+- [x] 未改 zhongjun / 6+2 / V1.1 / 股池任何代码
+- [x] selector / core / production / example_ma_cross 未改
+- [x] staged 只有 3 个文件
+- [x] commit 成功 (063511d)
+- [x] 回执在 EOF 追加
