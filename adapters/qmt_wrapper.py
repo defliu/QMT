@@ -116,6 +116,11 @@ OPERATION_POINTS = ['0924', '1000', '1330', '1430']
 # 1330 = 下午方向确认后的决策
 # 1430 = 尾盘冲刺前的最后一次决策
 
+# 生产版买入委托窗口（保持外部通达信池与其他逻辑不变，仅前移买入时间）
+BUY_WINDOW_START = '1000'
+BUY_WINDOW_END = '1010'
+BUY_WINDOW_LABEL = '10:00-10:10'
+
 
 # ============================================================
 #  全局状态
@@ -514,6 +519,11 @@ def _is_trading_time(dt):
     if '1300' <= now_str <= '1500':
         return True
     return False
+
+
+def _is_buy_window(now):
+    """生产买入委托窗口：盘中 10:00-10:10。"""
+    return BUY_WINDOW_START <= now <= BUY_WINDOW_END
 
 
 # ============================================================
@@ -1738,7 +1748,7 @@ def _write_daily_log(today, C):
 
 def _get_allowed_sell_layers(now):
     """根据当前时点决定本轮允许哪些 sell decision triggered_layer 通过。
-    
+
     返回 dict:
         {'layers': set[str],           # 允许的 layer 白名单
          'exclude_sublayers': set[str]} # 排除的 sublayer 黑名单
@@ -2533,7 +2543,7 @@ def _execute_trade(C, today, dt):
     elif TEST_MODE:
         window = "测试全天"
     else:
-        window = "14:40-14:57"
+        window = BUY_WINDOW_LABEL
     prefix = "[调试模式]" if DEBUG_MODE else ""
     print("\n" + "=" * 60)
     print("  %s[%s] %s  盘中交易窗口 %s" % (prefix, STRATEGY_NAME, today, window))
@@ -3171,7 +3181,7 @@ class StrategyRunner(object):
             STRATEGY_NAME, STRATEGY_CAPITAL, _g_cumulative_pnl, current_nav))
         print("[%s] 持仓上限=%d只  %s" % (
             STRATEGY_NAME, MAX_HOLD,
-            "买入窗口=调试模式-全天候" if DEBUG_MODE else "买入窗口=14:40-14:57（数据含当天日线）"))
+            "买入窗口=调试模式-全天候" if DEBUG_MODE else "买入窗口=%s（数据含当天日线）" % BUY_WINDOW_LABEL))
         print("[%s] K线周期请设为「1分钟」" % STRATEGY_NAME)
 
     def handlebar(self, C):
@@ -3311,11 +3321,24 @@ class StrategyRunner(object):
             if not morning and not afternoon:
                 return  # 非交易时间，跳过
 
-        # 尾盘版：等待尾盘时间窗口
-        if not DEBUG_MODE and not TEST_MODE and now < '1440':
+        # 生产版：等待盘中买入窗口
+        if not DEBUG_MODE and not TEST_MODE and now < BUY_WINDOW_START:
             if not _g_wait_printed:
-                print("  [%s] 当前时间 %s, 等待尾盘时段 14:40..." % (STRATEGY_NAME, now))
+                print("  [%s] 当前时间 %s, 等待盘中买入窗口 %s..." % (STRATEGY_NAME, now, BUY_WINDOW_LABEL))
                 _g_wait_printed = True
+            return
+
+        if not DEBUG_MODE and not TEST_MODE and now > BUY_WINDOW_END:
+            if _g_pending_buys:
+                for code, info in list(_g_pending_buys.items()):
+                    _g_trader.cancel_order(info['order_id'], code)
+                    print("  [%s] 盘中买入窗口结束，撤单 %s 买入%s" % (STRATEGY_NAME, code, info['order_id']))
+                _g_pending_buys = {}
+            if _g_retry_queue:
+                print("  [%s] 盘中买入窗口结束，清空买入重试队列 %d 只" % (STRATEGY_NAME, len(_g_retry_queue)))
+                _g_retry_queue = []
+            _g_today_done = True
+            print("  [%s] 盘中买入窗口已结束，停止今日新买入" % STRATEGY_NAME)
             return
 
         # ===== 全天调试版：启动时首次全流程执行 =====
@@ -3343,8 +3366,8 @@ class StrategyRunner(object):
                 print("  [%s] 所有买入委托已确认，交易结束" % STRATEGY_NAME)
             return
 
-        # 测试模式 / 尾盘生产版：允许交易
-        if TEST_MODE or ('1440' <= now <= '1457'):
+        # 测试模式 / 盘中生产版：允许交易
+        if TEST_MODE or _is_buy_window(now):
             if not _g_data_loaded:
                 print("\n[%s] %s  加载交易日数据..." % (STRATEGY_NAME, today))
                 _load_data(C, dt)
@@ -3353,7 +3376,7 @@ class StrategyRunner(object):
             ok = _execute_trade(C, today, dt)
             if ok is False and now < '1500':
                 _g_data_loaded = False
-                print("  [%s] 选股池无可选项，尾盘阶段自动重试..." % STRATEGY_NAME)
+                print("  [%s] 选股池无可选项，盘中买入窗口内自动重试..." % STRATEGY_NAME)
                 return
             if not _g_pending_buys and not _g_retry_queue and not _g_pending_sells:
                 _write_daily_log(today, C)
