@@ -575,6 +575,55 @@ def get_account_holdings(account_id, account_type='STOCK'):
     return holdings
 
 
+def _sync_holdings_from_account(C, today):
+    """用实际账户持仓强制同步 _g_my_codes 与卖出引擎 current_shares。
+
+    修 603618 类残留：卖出反查失败误判后，实盘已清仓但 _g_my_codes 残留占名额。
+    - 实际 volume<=0 的 _g_my_codes 票：pop 掉，卖出引擎标 cleared
+    - 实际有 volume 但 _g_my_codes 没有的：不自动加入（避免误纳手动仓），只打印诊断
+    返回同步后实际有持仓(volume>0)的 code set。
+    """
+    global _g_my_codes
+    if _g_trader is None:
+        return set()
+    removed = []
+    for code in list(_g_my_codes.keys()):
+        try:
+            pos = _g_trader.get_position(code)
+        except Exception:
+            pos = None
+        vol = pos.get('volume', 0) if pos else 0
+        if vol <= 0:
+            _g_my_codes.pop(code, None)
+            removed.append(code)
+            if _g_sell_engine is not None:
+                state = _g_sell_engine._states.get(code)
+                if state is not None and not state.cleared:
+                    state.cleared = True
+                    state.cleared_date = today
+                    state.current_shares = 0
+    if removed:
+        print("  [持仓同步] 移除已清仓 %d 只: %s" % (len(removed), sorted(removed)))
+        try:
+            write_holdings_file(INTRADAY_HOLD_FILE, _g_my_codes)
+        except Exception as e:
+            print("  [持仓同步] 写持仓文件失败: %s" % e)
+        if _g_sell_engine is not None:
+            try:
+                _g_sell_engine.save_state()
+            except Exception as e:
+                print("  [持仓同步] 保存卖出引擎状态失败: %s" % e)
+    held = set()
+    for code in _g_my_codes.keys():
+        try:
+            pos = _g_trader.get_position(code)
+        except Exception:
+            pos = None
+        if pos and pos.get('volume', 0) > 0:
+            held.add(code)
+    return held
+
+
 def read_nav_file(filepath):
     if not os.path.exists(filepath):
         return 0.0
@@ -2116,12 +2165,45 @@ def _check_pending_sells(C, today):
                 _g_pending_sells.pop(code, None)
                 _g_my_codes.pop(code, None)
                 continue
+            # 反查失败兜底：先查实际持仓再判成败，避免误撤活着的限价卖单
             pos = _g_trader.get_position(code)
-            if pos is None or pos.get('volume', 0) == 0:
-                _finish_pending_sell(C, code, info, info["volume"])
-                print("  [卖出确认] %s 全部成交 (持仓确认)" % code)
+            actual_vol = pos.get('volume', 0) if pos else 0
+            ordered_vol = info.get('volume', 0)
+            already_traded = info.get('already_traded', 0)
+            prev_vol = ordered_vol + already_traded  # 委托前持仓估算
+            if actual_vol <= 0:
+                # 全部成交
+                _finish_pending_sell(C, code, info, ordered_vol)
+                print("  [卖出确认] %s 全部成交 (反查失败但持仓归零)" % code)
                 _confirm_engine_clear(code, today, info)
+            elif actual_vol < prev_vol:
+                # 部分成交：按已减部分确认，剩余继续等，不撤单不重试
+                traded = prev_vol - actual_vol
+                if traded > 0:
+                    sell_price = info.get('sell_price', 0)
+                    cost_price = info.get('cost', 0)
+                    realized = 0
+                    if cost_price > 0 and sell_price > 0:
+                        realized = (sell_price - cost_price) * traded
+                        _g_cumulative_pnl += realized
+                        write_nav_file(INTRADAY_NAV_FILE, _g_cumulative_pnl)
+                    _append_trade_record(C, '卖出', code, sell_price, traded,
+                                         profit_pct=info.get('pct', 0),
+                                         profit_amount=realized)
+                    print("    已实现盈亏: %+.0f  累计: %+.0f" % (realized, _g_cumulative_pnl))
+                    print("  [卖出确认] %s 反查失败但部分成交 %d/%d 股 (持仓确认，剩余继续等)" % (
+                        code, traded, ordered_vol))
+                    info['volume'] = ordered_vol - traded
+                    info['already_traded'] = already_traded + traded
+                    _g_pending_sells[code] = info  # 保留剩余继续等，不撤单不重试
+                else:
+                    _g_trader.cancel_order(info['order_id'], code)
+                    if code not in _g_retry_skip_printed:
+                        _g_retry_skip_printed.add(code)
+                        print("  [卖出重试] %s 订单未找到，撤单后重新委托" % code)
+                    _retry_pending_sell(code, dict(info, retries=info.get('retries', 0) + 1), C)
             else:
+                # actual_vol >= prev_vol，确实没成交，走原撤单重试
                 _g_trader.cancel_order(info['order_id'], code)
                 if code not in _g_retry_skip_printed:
                     _g_retry_skip_printed.add(code)
@@ -2143,7 +2225,6 @@ def _check_pending_sells(C, today):
             cost_price = info.get('cost', 0)
             if cost_price > 0 and sell_price > 0:
                 realized = (sell_price - cost_price) * vol_traded
-                global _g_cumulative_pnl
                 _g_cumulative_pnl += realized
                 write_nav_file(INTRADAY_NAV_FILE, _g_cumulative_pnl)
                 print("    已实现盈亏: %+.0f  累计: %+.0f" % (realized, _g_cumulative_pnl))
@@ -2537,6 +2618,8 @@ def _execute_trade(C, today, dt):
     global _g_my_codes, _g_pending_buys, _g_pending_sells, _g_pending_limitdown_sells
 
     _refresh_trade_data(C)
+    # 买入前再校验实际持仓，防止盘中已清仓的票残留占名额
+    _sync_holdings_from_account(C, today)
 
     if DEBUG_MODE:
         window = "调试全天"
@@ -2641,7 +2724,9 @@ def _execute_trade(C, today, dt):
         print("  [打分] 无候选股通过")
         return True
 
-    already_held = 账户持仓 | set(_g_my_codes.keys()) | 对方持仓集 | set(_g_pending_buys.keys())
+    # 用同步后实际有持仓的票数算名额，避免已清仓票残留占名额
+    actual_held = _sync_holdings_from_account(C, today)
+    already_held = actual_held | set(_g_my_codes.keys()) | 对方持仓集 | set(_g_pending_buys.keys())
     buyable = []
     for s in scored:
         code = s['code']
@@ -2656,7 +2741,7 @@ def _execute_trade(C, today, dt):
         print("  [买入] 所有候选股票已被持有，跳过")
         return True
 
-    可买数量 = max(0, MAX_HOLD - len(账户持仓))
+    可买数量 = max(0, MAX_HOLD - len(actual_held))
     _g_candidate_queue = buyable[可买数量:]
     buyable = buyable[:可买数量]
 
@@ -3230,6 +3315,8 @@ class StrategyRunner(object):
             _reset_log_buffers()
             if _g_sell_engine:
                 _g_sell_engine.load_state()
+            # 开盘首帧强制同步实际账户持仓（修 603618 类残留）
+            _sync_holdings_from_account(C, today)
             if DEBUG_MODE:
                 _g_op_executed = {}
 
