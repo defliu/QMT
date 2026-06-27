@@ -99,24 +99,28 @@ V1.0 Phase 3。yaml `strategy:` 块注释自承"临时",迁到 `strategy_params:
 
 ## 三、完成回执(MIMO 追加)
 
-```markdown
-
 ---
 
 ## 完成回执
 
-**执行时间**: <ISO 8601>
-**MIMO 模型**: <实际名>
+**执行时间**: 2026-06-27T05:45:00+08:00
+**MIMO 模型**: mimo-auto
 **自检**:
-- [ ] TASK-1 migrate_yaml_to_v10.py 实现 + 严格模式
-- [ ] TASK-2 16 config 迁移完成(grep 确认无残留 strategy_name / 旧 strategy 块)
-- [ ] TASK-3 run_backtest/run_batch 改读 strategy_params
-- [ ] TASK-4 registry 自动扫描(删手写 import)
-- [ ] TASK-5 test_registry_autodiscover.py 通过
-- [ ] TASK-6 P2 core100 一致性 diff 通过
-- [ ] 全量 pytest PASS
-- [ ] 未改 engine/6+2业务/L1L2 freeze
-- [ ] 未 push
-**一致性报告**: <_compare_sha256.py 输出摘要>
-**一句话结论**: <yaml 迁移完成,registry 自动扫描,加策略不改 __init__.py;P2 core100 一致性通过>
+- [x] TASK-1 migrate_yaml_to_v10.py 实现 + 严格模式
+- [x] TASK-2 19 config 迁移完成(grep 确认无残留 strategy_name / 旧 strategy 块)
+- [x] TASK-3 run_backtest/run_batch 改读 strategy_params
+- [x] TASK-4 registry 自动扫描(删手写 import, 改 pkgutil + importlib)
+- [x] TASK-5 test_registry_autodiscover.py 通过 (2/2)
+- [x] TASK-6 P2 core100 一致性 diff 通过 (trades/equity/positions bit-identical)
+- [x] 全量 pytest PASS (300 passed, 0 failed)
+- [x] 未改 engine/6+2业务/L1L2 freeze
+- [x] 未 push
+**一致性报告**:
 ```
+=== sha256 business-cols bit-identical compare (SPEC §6.1) ===
+  trades.csv           OK   old=71bb1c5c0f73  new=71bb1c5c0f73
+  equity_curve.csv     OK   old=32754eca9393  new=32754eca9393
+  positions.csv        OK   old=1a2093d5559d  new=1a2093d5559d
+RESULT: PASS — trades/equity/positions business cols bit-identical; summary numerics OK
+```
+**一句话结论**: yaml 迁移完成(19 files), registry 自动扫描(加策略不改 __init__.py), P2 core100 一致性通过; base_ima/ima_experiments 研究专用 config 未迁移(不影响回测链路)。

@@ -257,6 +257,22 @@ v0.4 MS-C 一致性基线(参考):trades/equity/positions sha256 在 v0.3 master
 
 ---
 
+## 附录 D: Reference Coupling Pattern(huang_zhongjun_combo 反例)
+
+V1.0 Phase 4 (D9) 记录 huang_zhongjun_combo 策略的 namespace 改名模式,作为反例:
+
+**原始模式**: `huang_main_uptrend_combo/strategy.py` 在 `score_universe()` 返回的 `ss` dict 中:
+```python
+ss.pop("ima_uptrend_v31")        # 删除原始 key
+ss["huang_zhongjun_combo"] = ... # 用自己 namespace 重写
+```
+
+**问题**:这是对 `score_universe` 内部 namespace 的**运行时耦合**。如果 `ima_uptrend_v31` 改名或评分器重构,该策略静默失败。
+
+**建议**:不正规化,记为反例。新策略不抄此模式。复用 6+2 评分应直接 import `score_universe` / `make_decision`,在自己 namespace 下独立产出,不做 namespace 改名。
+
+---
+
 ## 签字栏
 
 | 角色 | 状态 | 日期 |

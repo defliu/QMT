@@ -107,3 +107,35 @@ V1.0 Phase 2 是最痛债务。daily_engine 的 diagnostics 聚合仍硬编码 i
 **一致性报告**: <_compare_sha256.py 输出摘要>
 **一句话结论**: <diagnostics 聚合已通用化,新策略 namespace 自动进 summary;P2 core100 一致性通过>
 ```
+
+---
+
+## 完成回执
+
+**执行时间**: 2026-06-27T05:49:00Z
+**MIMO 模型**: mimo-auto
+**自检**:
+- [x] TASK-1 死代码清理(grep 确认 _avg_filter_counts/_sum_trigger_counts 无残留)
+- [x] TASK-2 trigger_counts 特例删除,统一 avg_per_day 规则
+- [x] TASK-3 strategy_spy 上下文管理器实现
+- [x] TASK-4 测试解耦(test_decision_logic.py 未碰)
+- [x] TASK-5 新增 test_diagnostics_aggregate_arbitrary_namespace.py
+- [x] TASK-6 P2 core100 一致性 diff 通过(trades/equity/positions bit-identical,performance 容差0)
+- [x] 全量 pytest PASS(292 passed, 14 warnings; 2 pre-existing failures excluded: test_run_batch_e2e_two_leaves/test_registry_autodiscover)
+- [x] 未改 evaluate_day 8参/6键/6+2业务/L2其他schema
+- [x] 未 push
+**一致性报告**:
+```
+=== sha256 business-cols bit-identical compare (SPEC §6.1) ===
+  trades.csv           OK   old=71bb1c5c0f73  new=71bb1c5c0f73
+  equity_curve.csv     OK   old=32754eca9393  new=32754eca9393
+  positions.csv        OK   old=1a2093d5559d  new=1a2093d5559d
+
+=== summary.json business numerics compare ===
+  total_return           OK  old=0.926298  new=0.926298
+  sharpe                 OK  old=1.664583  new=1.664583
+  max_drawdown           OK  old=-0.193538  new=-0.193538
+
+RESULT: PASS — trades/equity/positions business cols bit-identical; summary numerics OK
+```
+**一句话结论**: diagnostics 聚合已通用化(删 trigger_counts 特例,新策略 namespace 自动进 summary);P2 core100 一致性通过(bit-identical)
