@@ -1,0 +1,142 @@
+{
+  "label": "p2_1b_d_mv_floor_50yi_monthly",
+  "derived_from": "p2_1b_full_a_top100_monthly",
+  "description": "P2.1.b base + circ_mv floor 50 亿 (5,000,000 wan)",
+  "n": 100,
+  "rank_window": 60,
+  "bars_min": 120,
+  "history_window": 250,
+  "start_date": "2025-01-01",
+  "end_date": "2026-06-11",
+  "snapshots": [
+    {
+      "as_of": "2025-01-27",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20250127.csv",
+      "n_chosen": 56,
+      "win_start": "2024-11-04",
+      "win_end": "2025-01-27"
+    },
+    {
+      "as_of": "2025-02-28",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20250228.csv",
+      "n_chosen": 54,
+      "win_start": "2024-11-28",
+      "win_end": "2025-02-28"
+    },
+    {
+      "as_of": "2025-03-31",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20250331.csv",
+      "n_chosen": 55,
+      "win_start": "2024-12-27",
+      "win_end": "2025-03-31"
+    },
+    {
+      "as_of": "2025-04-30",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20250430.csv",
+      "n_chosen": 55,
+      "win_start": "2025-02-05",
+      "win_end": "2025-04-30"
+    },
+    {
+      "as_of": "2025-05-30",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20250530.csv",
+      "n_chosen": 56,
+      "win_start": "2025-03-04",
+      "win_end": "2025-05-30"
+    },
+    {
+      "as_of": "2025-06-30",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20250630.csv",
+      "n_chosen": 57,
+      "win_start": "2025-04-01",
+      "win_end": "2025-06-30"
+    },
+    {
+      "as_of": "2025-07-31",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20250731.csv",
+      "n_chosen": 56,
+      "win_start": "2025-05-08",
+      "win_end": "2025-07-31"
+    },
+    {
+      "as_of": "2025-08-29",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20250829.csv",
+      "n_chosen": 59,
+      "win_start": "2025-06-09",
+      "win_end": "2025-08-29"
+    },
+    {
+      "as_of": "2025-09-30",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20250930.csv",
+      "n_chosen": 70,
+      "win_start": "2025-07-09",
+      "win_end": "2025-09-30"
+    },
+    {
+      "as_of": "2025-10-31",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20251031.csv",
+      "n_chosen": 75,
+      "win_start": "2025-08-01",
+      "win_end": "2025-10-31"
+    },
+    {
+      "as_of": "2025-11-28",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20251128.csv",
+      "n_chosen": 76,
+      "win_start": "2025-08-29",
+      "win_end": "2025-11-28"
+    },
+    {
+      "as_of": "2025-12-31",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20251231.csv",
+      "n_chosen": 75,
+      "win_start": "2025-10-09",
+      "win_end": "2025-12-31"
+    },
+    {
+      "as_of": "2026-01-30",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20260130.csv",
+      "n_chosen": 72,
+      "win_start": "2025-11-06",
+      "win_end": "2026-01-30"
+    },
+    {
+      "as_of": "2026-02-27",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20260227.csv",
+      "n_chosen": 70,
+      "win_start": "2025-11-26",
+      "win_end": "2026-02-27"
+    },
+    {
+      "as_of": "2026-03-31",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20260331.csv",
+      "n_chosen": 77,
+      "win_start": "2025-12-26",
+      "win_end": "2026-03-31"
+    },
+    {
+      "as_of": "2026-04-30",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20260430.csv",
+      "n_chosen": 80,
+      "win_start": "2026-01-28",
+      "win_end": "2026-04-30"
+    },
+    {
+      "as_of": "2026-05-29",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20260529.csv",
+      "n_chosen": 76,
+      "win_start": "2026-03-03",
+      "win_end": "2026-05-29"
+    },
+    {
+      "as_of": "2026-06-11",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/core_d_20260611.csv",
+      "n_chosen": 75,
+      "win_start": "2026-03-16",
+      "win_end": "2026-06-11"
+    }
+  ],
+  "union_size": 138,
+  "union_csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/__union.csv",
+  "valid_snapshots": 18
+}

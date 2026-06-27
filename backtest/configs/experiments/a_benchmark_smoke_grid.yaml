@@ -1,0 +1,11 @@
+# coding: utf-8
+# A 阶段 smoke: 同一策略 leaf (mp=5/ms=55) 切换 hs300/zz500/zz1000 验证 benchmark 可用
+# 验证目标:
+#   1. benchmark_available=True
+#   2. summary.json 含 excess_return / information_ratio / tracking_error
+#   3. equity_curve.csv 有 benchmark_close / benchmark_return 非空
+batch:
+  id:   a_benchmark_smoke_grid
+  base: backtest/configs/p2_1b_full_a_pit_top100.yaml
+grid:
+  backtest.benchmark_code: ["000300.SH", "000905.SH", "000852.SH"]

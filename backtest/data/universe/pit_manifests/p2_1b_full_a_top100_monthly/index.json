@@ -1,0 +1,1164 @@
+{
+  "label": "p2_1b_full_a_top100_monthly",
+  "n": 100,
+  "rank_window": 60,
+  "bars_min": 120,
+  "history_window": 250,
+  "start_date": "2025-01-01",
+  "end_date": "2026-06-11",
+  "snapshots": [
+    {
+      "as_of": "2025-01-27",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20250127.csv",
+      "n_chosen": 100,
+      "win_start": "2024-11-04",
+      "win_end": "2025-01-27",
+      "top10": [
+        {
+          "code": "300059.SZ",
+          "n_bars": 227,
+          "amount_sum": 1195792240500.0
+        },
+        {
+          "code": "000063.SZ",
+          "n_bars": 227,
+          "amount_sum": 477596209165.0
+        },
+        {
+          "code": "688981.SH",
+          "n_bars": 227,
+          "amount_sum": 450345783049.0
+        },
+        {
+          "code": "603019.SH",
+          "n_bars": 227,
+          "amount_sum": 411190985433.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 227,
+          "amount_sum": 411042155556.0
+        },
+        {
+          "code": "300033.SZ",
+          "n_bars": 227,
+          "amount_sum": 393563544742.0
+        },
+        {
+          "code": "601127.SH",
+          "n_bars": 227,
+          "amount_sum": 369332946994.0
+        },
+        {
+          "code": "600030.SH",
+          "n_bars": 227,
+          "amount_sum": 356329527992.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 227,
+          "amount_sum": 314921308762.0
+        },
+        {
+          "code": "000977.SZ",
+          "n_bars": 227,
+          "amount_sum": 308927570727.0
+        }
+      ]
+    },
+    {
+      "as_of": "2025-02-28",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20250228.csv",
+      "n_chosen": 100,
+      "win_start": "2024-11-28",
+      "win_end": "2025-02-28",
+      "top10": [
+        {
+          "code": "300059.SZ",
+          "n_bars": 245,
+          "amount_sum": 841144820822.0
+        },
+        {
+          "code": "000063.SZ",
+          "n_bars": 245,
+          "amount_sum": 548739269764.0
+        },
+        {
+          "code": "688981.SH",
+          "n_bars": 245,
+          "amount_sum": 429259567865.0
+        },
+        {
+          "code": "000977.SZ",
+          "n_bars": 245,
+          "amount_sum": 368172134770.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 245,
+          "amount_sum": 359509861122.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 245,
+          "amount_sum": 342408938084.0
+        },
+        {
+          "code": "603019.SH",
+          "n_bars": 245,
+          "amount_sum": 341780632725.0
+        },
+        {
+          "code": "300033.SZ",
+          "n_bars": 245,
+          "amount_sum": 331283773668.0
+        },
+        {
+          "code": "300308.SZ",
+          "n_bars": 245,
+          "amount_sum": 301325896689.0
+        },
+        {
+          "code": "002131.SZ",
+          "n_bars": 245,
+          "amount_sum": 293939888797.0
+        }
+      ]
+    },
+    {
+      "as_of": "2025-03-31",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20250331.csv",
+      "n_chosen": 100,
+      "win_start": "2024-12-27",
+      "win_end": "2025-03-31",
+      "top10": [
+        {
+          "code": "300059.SZ",
+          "n_bars": 250,
+          "amount_sum": 647588521616.0
+        },
+        {
+          "code": "000063.SZ",
+          "n_bars": 250,
+          "amount_sum": 493801261156.0
+        },
+        {
+          "code": "002261.SZ",
+          "n_bars": 250,
+          "amount_sum": 369547238742.0
+        },
+        {
+          "code": "688981.SH",
+          "n_bars": 250,
+          "amount_sum": 363235478994.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 250,
+          "amount_sum": 358739818160.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 250,
+          "amount_sum": 341924772607.0
+        },
+        {
+          "code": "000977.SZ",
+          "n_bars": 250,
+          "amount_sum": 340480155391.0
+        },
+        {
+          "code": "002594.SZ",
+          "n_bars": 250,
+          "amount_sum": 312885932526.0
+        },
+        {
+          "code": "600519.SH",
+          "n_bars": 250,
+          "amount_sum": 281309392921.0
+        },
+        {
+          "code": "300308.SZ",
+          "n_bars": 250,
+          "amount_sum": 272999173781.0
+        }
+      ]
+    },
+    {
+      "as_of": "2025-04-30",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20250430.csv",
+      "n_chosen": 100,
+      "win_start": "2025-02-05",
+      "win_end": "2025-04-30",
+      "top10": [
+        {
+          "code": "300059.SZ",
+          "n_bars": 250,
+          "amount_sum": 507480159645.0
+        },
+        {
+          "code": "002261.SZ",
+          "n_bars": 250,
+          "amount_sum": 435308432823.0
+        },
+        {
+          "code": "002594.SZ",
+          "n_bars": 250,
+          "amount_sum": 374082312710.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 250,
+          "amount_sum": 365900919817.0
+        },
+        {
+          "code": "000063.SZ",
+          "n_bars": 250,
+          "amount_sum": 310982094880.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 250,
+          "amount_sum": 309951655226.0
+        },
+        {
+          "code": "600519.SH",
+          "n_bars": 250,
+          "amount_sum": 291681973397.0
+        },
+        {
+          "code": "000977.SZ",
+          "n_bars": 250,
+          "amount_sum": 286599003841.0
+        },
+        {
+          "code": "688981.SH",
+          "n_bars": 250,
+          "amount_sum": 271475622670.0
+        },
+        {
+          "code": "300251.SZ",
+          "n_bars": 250,
+          "amount_sum": 256342081187.0
+        }
+      ]
+    },
+    {
+      "as_of": "2025-05-30",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20250530.csv",
+      "n_chosen": 100,
+      "win_start": "2025-03-04",
+      "win_end": "2025-05-30",
+      "top10": [
+        {
+          "code": "300059.SZ",
+          "n_bars": 250,
+          "amount_sum": 403368201026.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 250,
+          "amount_sum": 354027431308.0
+        },
+        {
+          "code": "002594.SZ",
+          "n_bars": 250,
+          "amount_sum": 349853549021.0
+        },
+        {
+          "code": "002261.SZ",
+          "n_bars": 250,
+          "amount_sum": 298650379643.0
+        },
+        {
+          "code": "600519.SH",
+          "n_bars": 250,
+          "amount_sum": 273384481892.0
+        },
+        {
+          "code": "300476.SZ",
+          "n_bars": 250,
+          "amount_sum": 243368783928.0
+        },
+        {
+          "code": "002475.SZ",
+          "n_bars": 250,
+          "amount_sum": 239722700427.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 250,
+          "amount_sum": 237068642358.0
+        },
+        {
+          "code": "300502.SZ",
+          "n_bars": 250,
+          "amount_sum": 221208340497.0
+        },
+        {
+          "code": "601899.SH",
+          "n_bars": 250,
+          "amount_sum": 201660289120.0
+        }
+      ]
+    },
+    {
+      "as_of": "2025-06-30",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20250630.csv",
+      "n_chosen": 100,
+      "win_start": "2025-04-01",
+      "win_end": "2025-06-30",
+      "top10": [
+        {
+          "code": "300059.SZ",
+          "n_bars": 250,
+          "amount_sum": 427833902125.0
+        },
+        {
+          "code": "002594.SZ",
+          "n_bars": 250,
+          "amount_sum": 338062455858.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 250,
+          "amount_sum": 328938604192.0
+        },
+        {
+          "code": "600519.SH",
+          "n_bars": 250,
+          "amount_sum": 271195940880.0
+        },
+        {
+          "code": "300308.SZ",
+          "n_bars": 250,
+          "amount_sum": 267434861270.0
+        },
+        {
+          "code": "300502.SZ",
+          "n_bars": 250,
+          "amount_sum": 260776327334.0
+        },
+        {
+          "code": "002475.SZ",
+          "n_bars": 250,
+          "amount_sum": 260070173734.0
+        },
+        {
+          "code": "300476.SZ",
+          "n_bars": 250,
+          "amount_sum": 240316961187.0
+        },
+        {
+          "code": "002261.SZ",
+          "n_bars": 250,
+          "amount_sum": 210181508538.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 250,
+          "amount_sum": 208487922267.0
+        }
+      ]
+    },
+    {
+      "as_of": "2025-07-31",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20250731.csv",
+      "n_chosen": 100,
+      "win_start": "2025-05-08",
+      "win_end": "2025-07-31",
+      "top10": [
+        {
+          "code": "300059.SZ",
+          "n_bars": 250,
+          "amount_sum": 519702557034.0
+        },
+        {
+          "code": "300308.SZ",
+          "n_bars": 250,
+          "amount_sum": 393693057192.0
+        },
+        {
+          "code": "300502.SZ",
+          "n_bars": 250,
+          "amount_sum": 381103293646.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 250,
+          "amount_sum": 341623912727.0
+        },
+        {
+          "code": "002594.SZ",
+          "n_bars": 250,
+          "amount_sum": 326102956824.0
+        },
+        {
+          "code": "300476.SZ",
+          "n_bars": 250,
+          "amount_sum": 307397814763.0
+        },
+        {
+          "code": "600519.SH",
+          "n_bars": 250,
+          "amount_sum": 274090677893.0
+        },
+        {
+          "code": "600111.SH",
+          "n_bars": 250,
+          "amount_sum": 245591512587.0
+        },
+        {
+          "code": "300468.SZ",
+          "n_bars": 250,
+          "amount_sum": 234433198189.0
+        },
+        {
+          "code": "002475.SZ",
+          "n_bars": 250,
+          "amount_sum": 226516139247.0
+        }
+      ]
+    },
+    {
+      "as_of": "2025-08-29",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20250829.csv",
+      "n_chosen": 100,
+      "win_start": "2025-06-09",
+      "win_end": "2025-08-29",
+      "top10": [
+        {
+          "code": "300059.SZ",
+          "n_bars": 250,
+          "amount_sum": 784605527430.0
+        },
+        {
+          "code": "300308.SZ",
+          "n_bars": 250,
+          "amount_sum": 545662221224.0
+        },
+        {
+          "code": "300502.SZ",
+          "n_bars": 250,
+          "amount_sum": 529499800181.0
+        },
+        {
+          "code": "600111.SH",
+          "n_bars": 250,
+          "amount_sum": 514665040763.0
+        },
+        {
+          "code": "300476.SZ",
+          "n_bars": 250,
+          "amount_sum": 446753615485.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 250,
+          "amount_sum": 417414297320.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 250,
+          "amount_sum": 379002950943.0
+        },
+        {
+          "code": "601138.SH",
+          "n_bars": 250,
+          "amount_sum": 358498543351.0
+        },
+        {
+          "code": "600519.SH",
+          "n_bars": 250,
+          "amount_sum": 318802424492.0
+        },
+        {
+          "code": "300803.SZ",
+          "n_bars": 250,
+          "amount_sum": 310353148711.0
+        }
+      ]
+    },
+    {
+      "as_of": "2025-09-30",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20250930.csv",
+      "n_chosen": 100,
+      "win_start": "2025-07-09",
+      "win_end": "2025-09-30",
+      "top10": [
+        {
+          "code": "300059.SZ",
+          "n_bars": 250,
+          "amount_sum": 909024283406.0
+        },
+        {
+          "code": "300308.SZ",
+          "n_bars": 250,
+          "amount_sum": 878556435731.0
+        },
+        {
+          "code": "300502.SZ",
+          "n_bars": 250,
+          "amount_sum": 873470034157.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 250,
+          "amount_sum": 760583700274.0
+        },
+        {
+          "code": "300476.SZ",
+          "n_bars": 250,
+          "amount_sum": 755961160821.0
+        },
+        {
+          "code": "600111.SH",
+          "n_bars": 250,
+          "amount_sum": 710201011023.0
+        },
+        {
+          "code": "601138.SH",
+          "n_bars": 250,
+          "amount_sum": 627288232438.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 250,
+          "amount_sum": 618702613535.0
+        },
+        {
+          "code": "300274.SZ",
+          "n_bars": 250,
+          "amount_sum": 537274992113.0
+        },
+        {
+          "code": "002475.SZ",
+          "n_bars": 250,
+          "amount_sum": 498164370557.0
+        }
+      ]
+    },
+    {
+      "as_of": "2025-10-31",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20251031.csv",
+      "n_chosen": 100,
+      "win_start": "2025-08-01",
+      "win_end": "2025-10-31",
+      "top10": [
+        {
+          "code": "300308.SZ",
+          "n_bars": 250,
+          "amount_sum": 1042616031197.0
+        },
+        {
+          "code": "300502.SZ",
+          "n_bars": 250,
+          "amount_sum": 1009072083682.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 250,
+          "amount_sum": 930586933481.0
+        },
+        {
+          "code": "300476.SZ",
+          "n_bars": 250,
+          "amount_sum": 889488611608.0
+        },
+        {
+          "code": "300059.SZ",
+          "n_bars": 250,
+          "amount_sum": 881829482638.0
+        },
+        {
+          "code": "601138.SH",
+          "n_bars": 250,
+          "amount_sum": 762624117937.0
+        },
+        {
+          "code": "300274.SZ",
+          "n_bars": 250,
+          "amount_sum": 749435078587.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 250,
+          "amount_sum": 736947047689.0
+        },
+        {
+          "code": "600111.SH",
+          "n_bars": 250,
+          "amount_sum": 726180187773.0
+        },
+        {
+          "code": "002475.SZ",
+          "n_bars": 250,
+          "amount_sum": 652433025162.0
+        }
+      ]
+    },
+    {
+      "as_of": "2025-11-28",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20251128.csv",
+      "n_chosen": 100,
+      "win_start": "2025-08-29",
+      "win_end": "2025-11-28",
+      "top10": [
+        {
+          "code": "300308.SZ",
+          "n_bars": 250,
+          "amount_sum": 1177689494340.0
+        },
+        {
+          "code": "300502.SZ",
+          "n_bars": 250,
+          "amount_sum": 1046105380561.0
+        },
+        {
+          "code": "300274.SZ",
+          "n_bars": 250,
+          "amount_sum": 923585468143.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 250,
+          "amount_sum": 884573043805.0
+        },
+        {
+          "code": "300476.SZ",
+          "n_bars": 250,
+          "amount_sum": 881662954006.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 250,
+          "amount_sum": 810927491026.0
+        },
+        {
+          "code": "601138.SH",
+          "n_bars": 250,
+          "amount_sum": 800217520288.0
+        },
+        {
+          "code": "002475.SZ",
+          "n_bars": 250,
+          "amount_sum": 686111466646.0
+        },
+        {
+          "code": "300059.SZ",
+          "n_bars": 250,
+          "amount_sum": 630897412364.0
+        },
+        {
+          "code": "688981.SH",
+          "n_bars": 244,
+          "amount_sum": 585050890031.0
+        }
+      ]
+    },
+    {
+      "as_of": "2025-12-31",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20251231.csv",
+      "n_chosen": 100,
+      "win_start": "2025-10-09",
+      "win_end": "2025-12-31",
+      "top10": [
+        {
+          "code": "300308.SZ",
+          "n_bars": 250,
+          "amount_sum": 1081921123191.0
+        },
+        {
+          "code": "300502.SZ",
+          "n_bars": 250,
+          "amount_sum": 947365000585.0
+        },
+        {
+          "code": "300274.SZ",
+          "n_bars": 250,
+          "amount_sum": 804945770829.0
+        },
+        {
+          "code": "601138.SH",
+          "n_bars": 250,
+          "amount_sum": 715664516965.0
+        },
+        {
+          "code": "300476.SZ",
+          "n_bars": 250,
+          "amount_sum": 707451505922.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 250,
+          "amount_sum": 656218803490.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 250,
+          "amount_sum": 634295884677.0
+        },
+        {
+          "code": "002050.SZ",
+          "n_bars": 250,
+          "amount_sum": 536980086143.0
+        },
+        {
+          "code": "000063.SZ",
+          "n_bars": 250,
+          "amount_sum": 494174035644.0
+        },
+        {
+          "code": "002475.SZ",
+          "n_bars": 250,
+          "amount_sum": 484797525301.0
+        }
+      ]
+    },
+    {
+      "as_of": "2026-01-30",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20260130.csv",
+      "n_chosen": 100,
+      "win_start": "2025-11-06",
+      "win_end": "2026-01-30",
+      "top10": [
+        {
+          "code": "300308.SZ",
+          "n_bars": 250,
+          "amount_sum": 1109433816029.0
+        },
+        {
+          "code": "300502.SZ",
+          "n_bars": 250,
+          "amount_sum": 937279884426.0
+        },
+        {
+          "code": "300274.SZ",
+          "n_bars": 250,
+          "amount_sum": 693796504166.0
+        },
+        {
+          "code": "601138.SH",
+          "n_bars": 250,
+          "amount_sum": 686496767495.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 250,
+          "amount_sum": 624018912371.0
+        },
+        {
+          "code": "300476.SZ",
+          "n_bars": 250,
+          "amount_sum": 601862828760.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 250,
+          "amount_sum": 592086298528.0
+        },
+        {
+          "code": "300058.SZ",
+          "n_bars": 250,
+          "amount_sum": 581898341271.0
+        },
+        {
+          "code": "601899.SH",
+          "n_bars": 250,
+          "amount_sum": 579162077917.0
+        },
+        {
+          "code": "002050.SZ",
+          "n_bars": 250,
+          "amount_sum": 575932756340.0
+        }
+      ]
+    },
+    {
+      "as_of": "2026-02-27",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20260227.csv",
+      "n_chosen": 100,
+      "win_start": "2025-11-26",
+      "win_end": "2026-02-27",
+      "top10": [
+        {
+          "code": "300308.SZ",
+          "n_bars": 250,
+          "amount_sum": 1152847237763.0
+        },
+        {
+          "code": "300502.SZ",
+          "n_bars": 250,
+          "amount_sum": 1018811925659.0
+        },
+        {
+          "code": "601899.SH",
+          "n_bars": 250,
+          "amount_sum": 676719800828.0
+        },
+        {
+          "code": "300058.SZ",
+          "n_bars": 250,
+          "amount_sum": 647775220560.0
+        },
+        {
+          "code": "601138.SH",
+          "n_bars": 250,
+          "amount_sum": 636897902138.0
+        },
+        {
+          "code": "000547.SZ",
+          "n_bars": 250,
+          "amount_sum": 622752924081.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 250,
+          "amount_sum": 614821032289.0
+        },
+        {
+          "code": "300274.SZ",
+          "n_bars": 250,
+          "amount_sum": 611654183627.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 250,
+          "amount_sum": 610985253793.0
+        },
+        {
+          "code": "300476.SZ",
+          "n_bars": 250,
+          "amount_sum": 610748215027.0
+        }
+      ]
+    },
+    {
+      "as_of": "2026-03-31",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20260331.csv",
+      "n_chosen": 100,
+      "win_start": "2025-12-26",
+      "win_end": "2026-03-31",
+      "top10": [
+        {
+          "code": "300308.SZ",
+          "n_bars": 250,
+          "amount_sum": 1128745958188.0
+        },
+        {
+          "code": "300502.SZ",
+          "n_bars": 250,
+          "amount_sum": 1033818182683.0
+        },
+        {
+          "code": "601899.SH",
+          "n_bars": 250,
+          "amount_sum": 787202141037.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 250,
+          "amount_sum": 722968538497.0
+        },
+        {
+          "code": "300274.SZ",
+          "n_bars": 250,
+          "amount_sum": 658580038448.0
+        },
+        {
+          "code": "300058.SZ",
+          "n_bars": 250,
+          "amount_sum": 642666475086.0
+        },
+        {
+          "code": "300394.SZ",
+          "n_bars": 250,
+          "amount_sum": 620158648657.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 250,
+          "amount_sum": 574845501210.0
+        },
+        {
+          "code": "002202.SZ",
+          "n_bars": 250,
+          "amount_sum": 569695032622.0
+        },
+        {
+          "code": "000547.SZ",
+          "n_bars": 250,
+          "amount_sum": 568585110904.0
+        }
+      ]
+    },
+    {
+      "as_of": "2026-04-30",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20260430.csv",
+      "n_chosen": 100,
+      "win_start": "2026-01-28",
+      "win_end": "2026-04-30",
+      "top10": [
+        {
+          "code": "300308.SZ",
+          "n_bars": 250,
+          "amount_sum": 1196832856979.0
+        },
+        {
+          "code": "300502.SZ",
+          "n_bars": 250,
+          "amount_sum": 1144628257164.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 250,
+          "amount_sum": 819516955896.0
+        },
+        {
+          "code": "300394.SZ",
+          "n_bars": 250,
+          "amount_sum": 771858453697.0
+        },
+        {
+          "code": "601899.SH",
+          "n_bars": 250,
+          "amount_sum": 689870089643.0
+        },
+        {
+          "code": "300274.SZ",
+          "n_bars": 250,
+          "amount_sum": 651355125365.0
+        },
+        {
+          "code": "300476.SZ",
+          "n_bars": 250,
+          "amount_sum": 634693941323.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 250,
+          "amount_sum": 589402173230.0
+        },
+        {
+          "code": "000988.SZ",
+          "n_bars": 250,
+          "amount_sum": 589328213583.0
+        },
+        {
+          "code": "603986.SH",
+          "n_bars": 250,
+          "amount_sum": 564820453966.0
+        }
+      ]
+    },
+    {
+      "as_of": "2026-05-29",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20260529.csv",
+      "n_chosen": 100,
+      "win_start": "2026-03-03",
+      "win_end": "2026-05-29",
+      "top10": [
+        {
+          "code": "300308.SZ",
+          "n_bars": 250,
+          "amount_sum": 1325931962471.0
+        },
+        {
+          "code": "300502.SZ",
+          "n_bars": 250,
+          "amount_sum": 1257257765016.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 250,
+          "amount_sum": 892498087702.0
+        },
+        {
+          "code": "300394.SZ",
+          "n_bars": 250,
+          "amount_sum": 891035173415.0
+        },
+        {
+          "code": "603986.SH",
+          "n_bars": 250,
+          "amount_sum": 840212016235.0
+        },
+        {
+          "code": "300476.SZ",
+          "n_bars": 250,
+          "amount_sum": 823624871328.0
+        },
+        {
+          "code": "002384.SZ",
+          "n_bars": 250,
+          "amount_sum": 804352327702.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 250,
+          "amount_sum": 796586858499.0
+        },
+        {
+          "code": "000988.SZ",
+          "n_bars": 250,
+          "amount_sum": 788857299263.0
+        },
+        {
+          "code": "300274.SZ",
+          "n_bars": 250,
+          "amount_sum": 747744998486.0
+        }
+      ]
+    },
+    {
+      "as_of": "2026-06-11",
+      "csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/core_100_20260611.csv",
+      "n_chosen": 100,
+      "win_start": "2026-03-16",
+      "win_end": "2026-06-11",
+      "top10": [
+        {
+          "code": "300308.SZ",
+          "n_bars": 250,
+          "amount_sum": 1524908384529.0
+        },
+        {
+          "code": "300502.SZ",
+          "n_bars": 250,
+          "amount_sum": 1350844587647.0
+        },
+        {
+          "code": "603986.SH",
+          "n_bars": 250,
+          "amount_sum": 981611710078.0
+        },
+        {
+          "code": "300394.SZ",
+          "n_bars": 250,
+          "amount_sum": 968281480036.0
+        },
+        {
+          "code": "002384.SZ",
+          "n_bars": 250,
+          "amount_sum": 897436384298.0
+        },
+        {
+          "code": "300750.SZ",
+          "n_bars": 250,
+          "amount_sum": 894585587478.0
+        },
+        {
+          "code": "300476.SZ",
+          "n_bars": 250,
+          "amount_sum": 877816696438.0
+        },
+        {
+          "code": "688256.SH",
+          "n_bars": 250,
+          "amount_sum": 870845161903.0
+        },
+        {
+          "code": "601138.SH",
+          "n_bars": 250,
+          "amount_sum": 848816679344.0
+        },
+        {
+          "code": "002475.SZ",
+          "n_bars": 250,
+          "amount_sum": 756738769884.0
+        }
+      ]
+    }
+  ],
+  "union_size": 305,
+  "union_csv": "D:/QMT_STRATEGIES/backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/__union.csv",
+  "valid_snapshots": 18,
+  "monthly_churn": [
+    {
+      "as_of": "2025-02-28",
+      "added": 16,
+      "removed": 16
+    },
+    {
+      "as_of": "2025-03-31",
+      "added": 17,
+      "removed": 17
+    },
+    {
+      "as_of": "2025-04-30",
+      "added": 8,
+      "removed": 8
+    },
+    {
+      "as_of": "2025-05-30",
+      "added": 18,
+      "removed": 18
+    },
+    {
+      "as_of": "2025-06-30",
+      "added": 31,
+      "removed": 31
+    },
+    {
+      "as_of": "2025-07-31",
+      "added": 20,
+      "removed": 20
+    },
+    {
+      "as_of": "2025-08-29",
+      "added": 22,
+      "removed": 22
+    },
+    {
+      "as_of": "2025-09-30",
+      "added": 20,
+      "removed": 20
+    },
+    {
+      "as_of": "2025-10-31",
+      "added": 11,
+      "removed": 11
+    },
+    {
+      "as_of": "2025-11-28",
+      "added": 13,
+      "removed": 13
+    },
+    {
+      "as_of": "2025-12-31",
+      "added": 20,
+      "removed": 20
+    },
+    {
+      "as_of": "2026-01-30",
+      "added": 21,
+      "removed": 21
+    },
+    {
+      "as_of": "2026-02-27",
+      "added": 10,
+      "removed": 10
+    },
+    {
+      "as_of": "2026-03-31",
+      "added": 17,
+      "removed": 17
+    },
+    {
+      "as_of": "2026-04-30",
+      "added": 22,
+      "removed": 22
+    },
+    {
+      "as_of": "2026-05-29",
+      "added": 15,
+      "removed": 15
+    },
+    {
+      "as_of": "2026-06-11",
+      "added": 9,
+      "removed": 9
+    }
+  ],
+  "avg_monthly_churn_added": 17.06
+}

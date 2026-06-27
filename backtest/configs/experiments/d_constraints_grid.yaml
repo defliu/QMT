@@ -1,0 +1,26 @@
+# coding: utf-8
+# D 阶段实验：在 P2.1.b 305 PIT manifest 上叠加 huicexitong 派生的
+# 行业 / 流通市值约束，与 baseline 公平对照。
+#
+# base config: p2_1b_d_baseline.yaml
+#   - 已固定 strategy.max_positions=5, strategy.min_score=55.0
+#   - 已固定 backtest.benchmark_code=000300.SH
+#   - 三处差异之外，与 P2.1.b 同 leaf 完全一致
+#
+# 三个 leaf（仅切换 universe.pit_manifest）:
+#   * baseline   = P2.1.b 原 305 manifest
+#   * D1 ind10   = 行业 cap=10 (union 249, avg 77.9/snap)
+#   * D2 mv50yi  = 流通市值 >= 50 亿 (union 138, avg 66.3/snap)
+#
+# 红线：
+#   * 不改 strategy_core / 不动 evaluate_day 8 参 / 不切 reader 默认源
+#   * Manifest 是数据约束 universe，不是改 6+2 评分参数
+#   * run_batch.py 只支持 grid: cartesian，固定项必须落在 base config
+batch:
+  id:   d_constraints_grid
+  base: backtest/configs/p2_1b_d_baseline.yaml
+grid:
+  universe.pit_manifest:
+    - "backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/index.json"
+    - "backtest/data/universe/pit_manifests/p2_1b_d_industry_cap10_monthly/index.json"
+    - "backtest/data/universe/pit_manifests/p2_1b_d_mv_floor_50yi_monthly/index.json"
