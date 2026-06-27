@@ -13,9 +13,9 @@ Output:
   * Returns exit code 0 always (this is a probe, not a gate). Caller decides.
 
 Boundaries (night-shift §四):
-  * Reads F:/金策智算/...quantifydata.duckdb (read_only via DuckDBDailyReader).
+  * Reads E:/金策智算/...quantifydata.duckdb (read_only via DuckDBDailyReader).
   * Writes F:/backtest_workspace/logs/ only.
-  * Never writes C:/D:; never F:/金策智算/.
+  * Never writes C:/D:; never E:/金策智算/.
 """
 import argparse
 import datetime as _dt
@@ -25,16 +25,19 @@ import os
 import sys
 
 from backtest import paths
-from backtest.data_tools.duckdb_reader import DuckDBDailyReader
+from backtest.data_tools.duckdb_reader import (
+    DuckDBDailyReader, JINCE_ZHISUAN, QMT_SELF_OWNED, SUPPORTED_SOURCES,
+)
 from backtest.data_tools.universe import load_universe
 from backtest.scripts import init_workspace
 
 log = logging.getLogger("validate_data")
 
 
-def build_report(db_path, universe_csv=None, start_date=None, end_date=None):
+def build_report(db_path, universe_csv=None, start_date=None, end_date=None,
+                 data_source=JINCE_ZHISUAN):
     """Compute the validation report dict (no IO)."""
-    reader = DuckDBDailyReader(db_path)
+    reader = DuckDBDailyReader(db_path, data_source=data_source)
     try:
         if universe_csv is not None:
             uni = load_universe(universe_csv)
@@ -43,8 +46,10 @@ def build_report(db_path, universe_csv=None, start_date=None, end_date=None):
         else:
             cov = reader.coverage()
         report = {
-            "schema_version":   "0.2",
+            "schema_version":   "0.3",
             "generated_at":     _dt.datetime.now().isoformat(timespec="seconds"),
+            "data_backend":     "duckdb",
+            "data_source":      data_source,
             "db_path":          db_path,
             "db_mtime":         cov.get("db_mtime", ""),
             "wal_detected":     bool(reader.wal_detected),
@@ -60,6 +65,12 @@ def build_report(db_path, universe_csv=None, start_date=None, end_date=None):
                 "end_date":   end_date or "",
             },
         }
+        if data_source == QMT_SELF_OWNED:
+            report["volume_unit"] = "share"
+            report["adjustment"] = (
+                reader.default_filters.get("adjustment", "hfq"))
+            report["source_filter"] = (
+                reader.default_filters.get("source", "xtquant"))
         return report
     finally:
         reader.close()
@@ -81,7 +92,12 @@ def main(argv=None):
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(description="DuckDB data quality probe")
     parser.add_argument("--db", default=paths.JINCE_DB_PATH,
-                        help="path to quantifydata.duckdb (default: F:/金策智算/...)")
+                        help="path to DuckDB (default: E:/金策智算/...)")
+    parser.add_argument("--data-source", default=JINCE_ZHISUAN,
+                        choices=list(SUPPORTED_SOURCES),
+                        help="explicit data source / schema "
+                             "(jince_zhisuan: trade_time TZ; "
+                             "qmt_self_owned: trade_date DATE)")
     parser.add_argument("--universe", default=None,
                         help="optional universe csv to compute universe_coverage")
     parser.add_argument("--start-date", default=None)
@@ -90,7 +106,8 @@ def main(argv=None):
 
     init_workspace.ensure_workspace()
     report = build_report(args.db, universe_csv=args.universe,
-                          start_date=args.start_date, end_date=args.end_date)
+                          start_date=args.start_date, end_date=args.end_date,
+                          data_source=args.data_source)
     target = write_report(report)
     log.info("validation report: %s", target)
     print(target)

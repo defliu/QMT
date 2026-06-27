@@ -20,7 +20,7 @@ Output:
 Boundaries (night-shift §四):
   * Reads universe csv from D:; reads DuckDB read-only.
   * Writes JSON report only under F:/backtest_workspace/logs/.
-  * Never writes C:/D:; never F:/金策智算/.
+  * Never writes C:/D:; never E:/金策智算/.
 """
 import argparse
 import collections
@@ -158,7 +158,7 @@ def main(argv=None):
     parser.add_argument("--universe", required=True,
                         help="path to universe csv")
     parser.add_argument("--db", default=paths.JINCE_DB_PATH,
-                        help="path to quantifydata.duckdb (default: F:/金策智算/...)")
+                        help="path to quantifydata.duckdb (default: E:/金策智算/...)")
     parser.add_argument("--start-date", default=None)
     parser.add_argument("--end-date", default=None)
     parser.add_argument("--min-history-bars", type=int, default=60,

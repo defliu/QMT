@@ -16,7 +16,7 @@ Behavior:
 
 Boundaries (night-shift §四):
   * Reads/writes only F:/backtest_workspace/{results, results_archive}.
-  * Never touches D:/C:/F:\\金策智算\\.
+  * Never touches D:/C:/E:\\金策智算\\.
 """
 import argparse
 import datetime as _dt

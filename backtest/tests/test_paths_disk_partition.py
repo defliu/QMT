@@ -20,7 +20,7 @@ def test_jince_dir_unchanged_after_reader_round_trip(sample_db_path):
     r.coverage()
     r.close()
     after = sorted(os.listdir(jince_dir))
-    assert before == after, "F:/金策智算/ MUST NOT be written (decision I)"
+    assert before == after, "E:/金策智算/ MUST NOT be written (decision I)"
 
 def test_tempfile_redirected():
     init_workspace.redirect_tempdir()

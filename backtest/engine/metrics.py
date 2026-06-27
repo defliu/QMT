@@ -85,8 +85,30 @@ def _trading_day_diff(date_a, date_b, trading_calendar):
     return ib - ia
 
 
+def _benchmark_metrics(daily_returns, benchmark_returns, total_return,
+                       benchmark_total_return, n_days):
+    """Compute (excess_return, information_ratio, tracking_error).
+
+    Inputs are aligned daily-return arrays (same length, day 0 excluded).
+    """
+    diffs = [float(s) - float(b) for s, b in zip(daily_returns, benchmark_returns)]
+    excess = float(total_return) - float(benchmark_total_return)
+    if len(diffs) < 2:
+        return excess, None, None
+    mean = sum(diffs) / len(diffs)
+    var = sum((x - mean) ** 2 for x in diffs) / (len(diffs) - 1)
+    std = math.sqrt(var) if var > 0 else 0.0
+    tracking = std * math.sqrt(252.0)
+    if std > 0:
+        info_ratio = mean / std * math.sqrt(252.0)
+    else:
+        info_ratio = None
+    return excess, info_ratio, tracking
+
+
 def compute_metrics(equity_rows, trades, trading_calendar,
-                    initial_cash, benchmark_available=False):
+                    initial_cash, benchmark_available=False,
+                    benchmark_returns=None, benchmark_total_return=None):
     """Compute performance dict matching 04 §1.4.
 
     Args:
@@ -95,6 +117,11 @@ def compute_metrics(equity_rows, trades, trading_calendar,
         trading_calendar: list of YYYY-MM-DD trading-day strings.
         initial_cash: float, starting cash.
         benchmark_available: bool. False -> excess/info/tracking are None.
+        benchmark_returns: list of float daily returns aligned with
+            equity_rows[1:] (i.e. same length as the strategy daily_returns
+            slice). Only used when benchmark_available=True.
+        benchmark_total_return: float, cumulative return of the benchmark
+            over the same period. Only used when benchmark_available=True.
     """
     n_days = len(trading_calendar) if trading_calendar else len(equity_rows)
     if n_days <= 0:
@@ -151,4 +178,13 @@ def compute_metrics(equity_rows, trades, trading_calendar,
         "information_ratio": None,
         "tracking_error":    None,
     }
+    if benchmark_available and benchmark_returns is not None \
+            and benchmark_total_return is not None \
+            and len(benchmark_returns) == len(daily_returns):
+        excess, ir, te = _benchmark_metrics(
+            daily_returns, benchmark_returns,
+            total_return, benchmark_total_return, n_days)
+        perf["excess_return"] = round(excess, 6)
+        perf["information_ratio"] = None if ir is None else round(ir, 6)
+        perf["tracking_error"] = None if te is None else round(te, 6)
     return perf

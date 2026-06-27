@@ -1,7 +1,7 @@
 # coding: utf-8
 """End-to-end smoke test for the full backtest pipeline.
 
-Uses the sample DuckDB built from F:\\金策智算 (when available) to exercise
+Uses the sample DuckDB built from E:\\金策智算 (when available) to exercise
 the full chain: yaml -> reader -> daily_engine -> report writers -> 6 files.
 
 Skipped automatically when sample DB cannot be built (no source DB).

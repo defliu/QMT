@@ -13,7 +13,9 @@ def test_build_report_basic(sample_db_path):
     if not os.path.isfile(sample_db_path):
         pytest.skip("sample_db unavailable")
     report = validate_data.build_report(sample_db_path)
-    assert report["schema_version"] == "0.2"
+    assert report["schema_version"] == "0.3"
+    assert report["data_backend"] == "duckdb"
+    assert report["data_source"] == "jince_zhisuan"
     assert report["db_path"] == sample_db_path
     assert report["min_date"] != ""
     assert report["max_date"] != ""
@@ -57,3 +59,41 @@ def test_main_writes_to_logs_dir(sample_db_path, tmp_path, monkeypatch):
     files = [f for f in os.listdir(str(tmp_path))
              if f.startswith("validate_data_") and f.endswith(".json")]
     assert len(files) == 1
+
+
+def test_build_report_qmt_self_owned(tmp_path):
+    """validate_data 走 qmt_self_owned 路径，输出额外字段。"""
+    import datetime as _dt
+    import duckdb
+    p = str(tmp_path / "qmt.duckdb")
+    conn = duckdb.connect(p, read_only=False)
+    conn.execute("""
+        CREATE TABLE dat_day (
+            code VARCHAR NOT NULL, trade_date DATE NOT NULL,
+            open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE,
+            vol BIGINT, amount DOUBLE,
+            adjustment VARCHAR NOT NULL, source VARCHAR NOT NULL,
+            synced_at TIMESTAMP NOT NULL)
+    """)
+    conn.executemany(
+        "INSERT INTO dat_day VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [("000001.SZ", _dt.date(2025, 9, 1), 10, 11, 9, 10.5, 100000, 1e6,
+          "hfq", "xtquant", _dt.datetime(2026, 6, 14))])
+    conn.close()
+    report = validate_data.build_report(p, data_source="qmt_self_owned")
+    assert report["schema_version"] == "0.3"
+    assert report["data_source"] == "qmt_self_owned"
+    assert report["volume_unit"] == "share"
+    assert report["adjustment"] == "hfq"
+    assert report["source_filter"] == "xtquant"
+    assert report["min_date"] == "2025-09-01"
+    assert report["n_codes"] == 1
+
+
+def test_main_rejects_unknown_data_source(sample_db_path, tmp_path, monkeypatch):
+    """--data-source 必须在 SUPPORTED_SOURCES 内，argparse choices 严格校验。"""
+    if not os.path.isfile(sample_db_path):
+        pytest.skip("sample_db unavailable")
+    monkeypatch.setattr(paths, "LOGS_DIR", str(tmp_path).replace("\\", "/"))
+    with pytest.raises(SystemExit):
+        validate_data.main(["--db", sample_db_path, "--data-source", "bogus"])
