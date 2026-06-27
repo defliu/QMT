@@ -1,0 +1,29 @@
+# coding: utf-8
+# V1.0 migrated by migrate_yaml_to_v10.py
+# Example: MA cross strategy using astock parquet data source
+# Phase 4a smoke test config
+strategy: research/example_ma_cross
+trading_model: next_open
+
+backtest:
+  name: example_ma_cross_astock
+  start_date: "2025-09-02"
+  end_date:   "2025-09-26"
+  initial_cash: 1000000.0
+  benchmark_code: null
+
+data:
+  source: astock
+  path: "E:/astock/daily/stock_daily.parquet"
+
+universe:
+  csv: "backtest/data/universe/strategy_pool_base.csv"
+
+execution:
+  price: next_open
+  slippage: 0.001
+  commission_rate: 0.00025
+  tax_rate: 0.0001
+
+strategy_params:
+  max_positions: 5
