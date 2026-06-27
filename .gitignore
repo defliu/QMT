@@ -1,0 +1,30 @@
+# === Python cache ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+
+# === 运行时日志(不入库) ===
+.mimo_live*.log
+.mimo_ping.log
+.mimo_watch_state.txt
+agent_hub/.mimo_live.log
+agent_hub/.mimo_watch_state.txt
+
+# === QMT 运行时交换区日志(不入库) ===
+# 注:QMT_POOL 在 D:\ 另一目录,这里挡的是被 git 误识别的引用
+D：/QMT_POOL/
+D:/QMT_POOL/
+
+# === 一次性调试/探针脚本(不入库,临时性) ===
+backtest/data_tools/probe_*.py
+backtest/data_tools/quick_check_*.py
+backtest/data_tools/dump_*.py
+
+# === 工具产物 ===
+.codegraph/
+.claude/worktrees/
+
+# === 临时实验产物 ===
+*.tmp
