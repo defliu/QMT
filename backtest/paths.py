@@ -7,7 +7,7 @@ Disk partition policy (decision J):
   D: code only      -> D:/QMT_STRATEGIES/backtest/
   F: large products -> F:/backtest_workspace/
   C: NO writes      -> backtest products forbidden on C drive
-  F:/金策智算/      -> READ-ONLY data source
+  E:/金策智算/      -> READ-ONLY data source (NVMe SSD; switched from F: HDD on 2026-06-14)
 """
 import os
 
@@ -20,12 +20,11 @@ SAMPLE_DB_DIR   = WORKSPACE_ROOT + "/sample_db"
 CACHE_DIR       = WORKSPACE_ROOT + "/cache"
 LOGS_DIR        = WORKSPACE_ROOT + "/logs"
 
-# Read-only data source (decision I)
-JINCE_DB_PATH   = "F:/金策智算/_internal/databases/duckdb/quantifydata.duckdb"
+# Read-only data source (decision I; relocated to E: SSD on 2026-06-14 for read perf)
+JINCE_DB_PATH   = "E:/金策智算/_internal/databases/duckdb/quantifydata.duckdb"
 
-# OPEN_QUESTION (v0.3): project-owned DuckDB path; v0.2 NOT used.
-# Decision pending Hermes/诚哥 in v0.3 kickoff.
-PROJECT_MARKET_DB_V03_PLACEHOLDER = "D:/QMT_STRATEGIES/data/duckdb/qmt_market_data.duckdb"
+# v0.3 project-owned DuckDB path (resolved per D10 / OQ-1 closure)
+PROJECT_MARKET_DB = "F:/backtest_workspace/data/duckdb/qmt_market_data.duckdb"
 
 # D drive code paths
 BACKTEST_ROOT   = os.path.dirname(os.path.abspath(__file__))
