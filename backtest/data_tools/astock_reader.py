@@ -32,13 +32,16 @@ class AstockParquetReader(object):
     All date filtering works via index level accessors.
     """
 
-    def __init__(self, db_path=None, data_source=DATA_SOURCE_ASTOCK):
+    def __init__(self, db_path=None, data_source=DATA_SOURCE_ASTOCK, adjustment="raw"):
+        if adjustment not in ("raw", "qfq", "hfq"):
+            raise ValueError("adjustment must be one of raw/qfq/hfq, got: %s" % adjustment)
         if db_path is None:
             db_path = ASTOCK_DAILY_PATH
         if not os.path.isfile(db_path):
             raise FileNotFoundError("astock parquet not found: " + db_path)
         self.db_path = db_path
         self.data_source = data_source
+        self.adjustment = adjustment
         self.wal_detected = False
         self.wal_warning_message = ""
         self._df = pd.read_parquet(db_path)
@@ -72,8 +75,22 @@ class AstockParquetReader(object):
         for code, grp in sub.groupby(level="ts_code"):
             rows = grp.droplevel("ts_code").reset_index()
             rows["date"] = rows["trade_date"].dt.strftime("%Y-%m-%d")
-            rows = rows[["date", "open", "high", "low", "close", "vol", "amount"]]
             rows = rows.sort_values("date").reset_index(drop=True)
+            
+            if self.adjustment != "raw" and "adj_factor" in rows.columns:
+                adj_factor = rows["adj_factor"].values
+                price_cols = ["open", "high", "low", "close"]
+                
+                if self.adjustment == "hfq":
+                    for col in price_cols:
+                        rows[col] = rows[col] * adj_factor
+                elif self.adjustment == "qfq":
+                    latest_adj = adj_factor[-1]
+                    if latest_adj > 0:
+                        for col in price_cols:
+                            rows[col] = rows[col] * (adj_factor / latest_adj)
+            
+            rows = rows[["date", "open", "high", "low", "close", "vol", "amount"]]
             out[code] = rows
         return out
 
@@ -133,6 +150,14 @@ class AstockParquetReader(object):
             ts = pd.Timestamp(date)
             try:
                 val = self._df.loc[(ts, code), "close"]
+                if self.adjustment != "raw" and "adj_factor" in self._df.columns:
+                    adj = self._df.loc[(ts, code), "adj_factor"]
+                    if self.adjustment == "hfq":
+                        val = val * adj
+                    elif self.adjustment == "qfq":
+                        latest_adj = self._df.loc[(self._dates.max(), code), "adj_factor"] if code in self._df.index.get_level_values("ts_code") else adj
+                        if latest_adj > 0:
+                            val = val * (adj / latest_adj)
                 return float(val)
             except KeyError:
                 return None

@@ -264,6 +264,7 @@ def run_backtest(
                             # load_window pre-loads every code that any snapshot needs.
     strategy_name=None,     # v0.4: registry key, 默认 'production/ima_uptrend_v31'
     trading_model=None,     # v0.4: 默认 'next_open'；不在策略 ALLOWED 里则 ValueError
+    fundamentals_reader=None,  # B2b: optional AstockFinanceReader for daily PE injection
 ):
     """Run the full backtest. Returns an in-memory result struct.
 
@@ -407,6 +408,21 @@ def run_backtest(
                 "is_last_trading_day":  False,
                 "max_positions":        int(strategy_config.get("max_positions", 5)),
             }
+            
+            # B2b: inject fundamentals if reader provided
+            aux_data_for_eval = aux_for_eval
+            if fundamentals_reader is not None:
+                try:
+                    universe_today = (per_day_universe[today] if per_day_universe is not None
+                                      else universe)
+                    aux_today = dict(aux_for_eval)
+                    aux_today["fundamentals"] = fundamentals_reader.get_fundamentals_for_scoring(
+                        universe_today, today)
+                    aux_data_for_eval = aux_today
+                except Exception as e:
+                    log.warning("fundamentals reader failed for %s: %s; fallback to aux_for_eval", today, e)
+                    aux_data_for_eval = aux_for_eval
+            
             decision = _evaluate_day(
                 current_date=today,
                 market_window=window,
@@ -416,7 +432,7 @@ def run_backtest(
                           else universe),
                 account_state=account_state,
                 strategy_config=strategy_config,
-                aux_data=aux_for_eval,
+                aux_data=aux_data_for_eval,
             )
             diag = decision.get("diagnostics", {})
             # v0.4 通用字段
@@ -523,7 +539,7 @@ def run_backtest(
     data_hash = compute_data_hash(
         db_path=reader.db_path,
         db_mtime=cov.get("db_mtime", ""),
-        adjustment="hfq",
+        adjustment=getattr(reader, "adjustment", "hfq"),
         requested_start=start_date,
         requested_end=end_date,
         actual_min=actual_min,
@@ -556,7 +572,7 @@ def run_backtest(
         "data_source":     getattr(reader, "data_source", "jince_zhisuan"),
         "data_path":       reader.db_path,
         "data_mtime":      cov.get("db_mtime", ""),
-        "data_adjustment": "hfq",
+        "data_adjustment": getattr(reader, "adjustment", "hfq"),
         "data_coverage_actual": {
             "min_date":           cov.get("min_date", ""),
             "max_date":           cov.get("max_date", ""),

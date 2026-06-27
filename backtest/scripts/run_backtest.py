@@ -116,14 +116,29 @@ def main(argv=None):
 
     db_path = data_cfg.get("path", paths.JINCE_DB_PATH)
     data_source = data_cfg.get("source", JINCE_ZHISUAN)
+    adjustment = data_cfg.get("adjustment")
+    fundamentals_enabled = data_cfg.get("fundamentals", False)
+    
+    if adjustment is not None and adjustment not in ("raw", "qfq", "hfq"):
+        raise ValueError("data.adjustment must be one of raw/qfq/hfq, got: %s" % adjustment)
+    
     if data_source == "astock":
         from backtest.data_tools.astock_reader import AstockParquetReader
-        reader = AstockParquetReader(db_path)
+        reader = AstockParquetReader(db_path, adjustment=adjustment or "raw")
     else:
         if data_source not in SUPPORTED_SOURCES:
             raise ValueError("data.source must be one of %s, got: %s"
                              % (SUPPORTED_SOURCES, data_source))
         reader = DuckDBDailyReader(db_path, data_source=data_source)
+    
+    # B2b: construct fundamentals reader if enabled
+    fund_reader = None
+    if fundamentals_enabled and data_source == "astock":
+        from backtest.data_tools.astock_finance_reader import AstockFinanceReader
+        fund_reader = AstockFinanceReader()
+        log.info("fundamentals reader enabled for astock data source")
+    elif fundamentals_enabled:
+        log.warning("fundamentals not supported for data.source=%s; ignoring", data_source)
 
     try:
         result = run_backtest(
@@ -145,6 +160,7 @@ def main(argv=None):
             universe_by_date=universe_by_date,
             strategy_name=v04_strategy_name,
             trading_model=v04_trading_model,
+            fundamentals_reader=fund_reader,
         )
     finally:
         reader.close()
