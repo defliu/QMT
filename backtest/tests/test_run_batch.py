@@ -25,13 +25,13 @@ def test_set_dotted_overwrites_leaf():
 def test_expand_grid_cartesian_product(tmp_path):
     base = tmp_path / "base.yaml"
     base.write_text(
-        "backtest:\n  name: base\nstrategy:\n  max_positions: 5\n  min_score: 60\n",
+        "backtest:\n  name: base\nstrategy_params:\n  max_positions: 5\n  min_score: 60\n",
         encoding="utf-8")
     exp_cfg = {
         "batch": {"id": "g", "base": str(base)},
         "grid": {
-            "strategy.max_positions": [3, 5],
-            "strategy.min_score":     [55, 60, 65],
+            "strategy_params.max_positions": [3, 5],
+            "strategy_params.min_score":     [55, 60, 65],
         },
     }
     leaves = list(run_batch.expand_grid(exp_cfg))
@@ -41,8 +41,8 @@ def test_expand_grid_cartesian_product(tmp_path):
     # every leaf has both keys applied
     for _, name, cfg in leaves:
         assert "max_positions=" in name and "min_score=" in name
-        assert cfg["strategy"]["max_positions"] in (3, 5)
-        assert cfg["strategy"]["min_score"] in (55, 60, 65)
+        assert cfg["strategy_params"]["max_positions"] in (3, 5)
+        assert cfg["strategy_params"]["min_score"] in (55, 60, 65)
 
 
 def test_expand_grid_empty_grid_yields_one(tmp_path):
@@ -108,7 +108,7 @@ def test_run_batch_e2e_two_leaves(sample_db_path, tmp_path, monkeypatch):
         "  slippage: 0.001\n"
         "  commission_rate: 0.00025\n"
         "  tax_rate: 0.0001\n"
-        "strategy:\n"
+        "strategy_params:\n"
         "  max_positions: 5\n"
         "  rebalance_policy: daily\n"
         "  min_score: 60.0\n"
@@ -128,7 +128,7 @@ def test_run_batch_e2e_two_leaves(sample_db_path, tmp_path, monkeypatch):
     exp_yaml = tmp_path / "exp.yaml"
     exp_yaml.write_text(
         "batch:\n  id: e2e_test\n  base: '" + str(base_yaml).replace("\\", "/") + "'\n"
-        "grid:\n  strategy.max_positions: [3, 5]\n",
+        "grid:\n  strategy_params.max_positions: [3, 5]\n",
         encoding="utf-8")
 
     rc = run_batch.main(["--experiment", str(exp_yaml)])
