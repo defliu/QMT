@@ -13,9 +13,8 @@ def test_jince_db_path_pointer_only():
     assert paths.JINCE_DB_PATH.endswith("quantifydata.duckdb")
     assert "金策智算" in paths.JINCE_DB_PATH
 
-def test_v03_open_question_placeholder_exists():
-    # 决策 5：v0.3 路径必须以 OPEN_QUESTION 标记保留
-    assert hasattr(paths, "PROJECT_MARKET_DB_V03_PLACEHOLDER")
-    src = open(paths.__file__, "r", encoding="utf-8").read()
-    assert "OPEN_QUESTION" in src
-    assert "v0.3" in src
+def test_v03_market_db_resolved_to_f_drive():
+    # D10 / OQ-1 closure: placeholder resolved to actual F: drive path
+    assert hasattr(paths, "PROJECT_MARKET_DB")
+    assert paths.PROJECT_MARKET_DB.startswith("F:/")
+    assert "qmt_market_data.duckdb" in paths.PROJECT_MARKET_DB
