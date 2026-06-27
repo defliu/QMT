@@ -1,0 +1,43 @@
+# coding: utf-8
+# V1.0 migrated by migrate_yaml_to_v10.py
+# P2.1.b: 全 A PIT top-100 月度 manifest 基线配置
+# universe 来自 build_full_a_pit_manifest.py (305 codes 并集；月度 top100; bars_min=120)
+# 数据库已 sync 2025-01-01..2026-06-11；max_date 实际到 2026-06-10。
+# 注：start/end 与 P2.1 同窗以便严格对比。
+
+backtest:
+  name: p2_1b_full_a_pit_top100
+  start_date: "2025-01-01"
+  end_date:   "2026-06-11"
+  initial_cash: 1000000.0
+  benchmark_code: null
+
+data:
+  source: qmt_self_owned
+  path:   "F:/backtest_workspace/data/duckdb/qmt_market_data.duckdb"
+  adjustment: hfq
+
+universe:
+  pit_manifest: "backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/index.json"
+
+execution:
+  price: next_open
+  slippage: 0.001
+  commission_rate: 0.00025
+  tax_rate: 0.0001
+
+strategy_params:
+  max_positions: 5
+  rebalance_policy: daily
+  min_score: 60.0
+  min_core: 32.0
+  max_bias5: 10.0
+  max_daily_pct: 9.0
+  sector_heat_mode: zero
+  score_gap_threshold: 15.0
+  early_stop_days: 3
+  early_stop_loss: -0.05
+  stop_loss: -0.08
+  warning_score_threshold: 50.0
+  early_stop_holding_days: 5
+  early_stop_min_return: 0.03

@@ -1,0 +1,10 @@
+# coding: utf-8
+# V1.0 migrated by migrate_yaml_to_v10.py
+# P2.1.b grid: 全 A PIT top-100 月度并集 305 codes
+# Hermes §四 要求: max_positions=[3,5,8] x min_score=[55.0, 60.0] = 6 leaves
+batch:
+  id:   p2_1b_full_a_pit_top100_grid
+  base: backtest/configs/p2_1b_full_a_pit_top100.yaml
+grid:
+  strategy_params.max_positions:        [3, 5, 8]
+  strategy_params.min_score:             [55.0, 60.0]

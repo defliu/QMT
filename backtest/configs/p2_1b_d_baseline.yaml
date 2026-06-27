@@ -1,0 +1,46 @@
+# coding: utf-8
+# V1.0 migrated by migrate_yaml_to_v10.py
+# D 阶段实验专用 base config
+# 与 p2_1b_full_a_pit_top100.yaml 的差异（仅三处）：
+#   - strategy.max_positions: 5      （P2.1.b 唯一正收益 leaf）
+#   - strategy.min_score:     55.0   （P2.1.b 唯一正收益 leaf）
+#   - backtest.benchmark_code: "000300.SH"  （A 阶段已就位的标尺）
+# universe.pit_manifest 由 d_constraints_grid.yaml 的 grid 注入。
+# 其余 strategy 参数与 P2.1.b 保持完全一致。
+
+backtest:
+  name: p2_1b_d_baseline
+  start_date: "2025-01-01"
+  end_date:   "2026-06-11"
+  initial_cash: 1000000.0
+  benchmark_code: "000300.SH"
+
+data:
+  source: qmt_self_owned
+  path:   "F:/backtest_workspace/data/duckdb/qmt_market_data.duckdb"
+  adjustment: hfq
+
+universe:
+  pit_manifest: "backtest/data/universe/pit_manifests/p2_1b_full_a_top100_monthly/index.json"
+
+execution:
+  price: next_open
+  slippage: 0.001
+  commission_rate: 0.00025
+  tax_rate: 0.0001
+
+strategy_params:
+  max_positions: 5
+  rebalance_policy: daily
+  min_score: 55.0
+  min_core: 32.0
+  max_bias5: 10.0
+  max_daily_pct: 9.0
+  sector_heat_mode: zero
+  score_gap_threshold: 15.0
+  early_stop_days: 3
+  early_stop_loss: -0.05
+  stop_loss: -0.08
+  warning_score_threshold: 50.0
+  early_stop_holding_days: 5
+  early_stop_min_return: 0.03

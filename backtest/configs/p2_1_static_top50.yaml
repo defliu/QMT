@@ -1,21 +1,27 @@
+# coding: utf-8
 # V1.0 migrated by migrate_yaml_to_v10.py
+# P2.1: top-50 static (从 core_100 取前 50)，作为 top-50 PIT 的静态对照
 backtest:
-  name: real_4m
-  start_date: "2025-11-15"
-  end_date:   "2026-02-27"
+  name: p2_1_static_top50
+  start_date: "2025-01-01"
+  end_date:   "2026-06-11"
   initial_cash: 1000000.0
   benchmark_code: null
+
 data:
-  source: jince_zhisuan
-  path:   "E:/金策智算/_internal/databases/duckdb/quantifydata.duckdb"
+  source: qmt_self_owned
+  path:   "F:/backtest_workspace/data/duckdb/qmt_market_data.duckdb"
   adjustment: hfq
+
 universe:
-  csv: "backtest/data/universe/strategy_pool_base.csv"
+  csv: "backtest/data/universe/core_50_static.csv"
+
 execution:
   price: next_open
   slippage: 0.001
   commission_rate: 0.00025
   tax_rate: 0.0001
+
 strategy_params:
   max_positions: 5
   rebalance_policy: daily

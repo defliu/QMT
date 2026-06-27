@@ -1,0 +1,9 @@
+# coding: utf-8
+# V1.0 migrated by migrate_yaml_to_v10.py
+# P2.1 grid: static top-50 (core_50_static.csv), 6 leaves，PIT top-50 的静态对照
+batch:
+  id:   p2_1_static_top50_grid
+  base: backtest/configs/p2_1_static_top50.yaml
+grid:
+  strategy_params.max_positions:        [3, 5, 8]
+  strategy_params.min_score:             [55.0, 60.0]

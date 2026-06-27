@@ -88,10 +88,10 @@ def main(argv=None):
     data_cfg = cfg.get("data", {})
     universe_cfg = cfg.get("universe", {})
     exec_cfg = cfg.get("execution", {})
-    strat_cfg = cfg.get("strategy", {})
+    strat_cfg = cfg.get("strategy_params", {})
 
-    # v0.4 Phase 1 / MS-A: 顶层 strategy_name + trading_model
-    v04_strategy_name = cfg.get("strategy_name") or "production/ima_uptrend_v31"
+    # V1.0 Phase 3: 顶层 strategy + trading_model
+    v04_strategy_name = cfg.get("strategy") or "production/ima_uptrend_v31"
     v04_trading_model = cfg.get("trading_model") or exec_cfg.get("price", "next_open")
 
     config_name = bt.get("name", "baseline")
@@ -116,10 +116,14 @@ def main(argv=None):
 
     db_path = data_cfg.get("path", paths.JINCE_DB_PATH)
     data_source = data_cfg.get("source", JINCE_ZHISUAN)
-    if data_source not in SUPPORTED_SOURCES:
-        raise ValueError("data.source must be one of %s, got: %s"
-                         % (SUPPORTED_SOURCES, data_source))
-    reader = DuckDBDailyReader(db_path, data_source=data_source)
+    if data_source == "astock":
+        from backtest.data_tools.astock_reader import AstockParquetReader
+        reader = AstockParquetReader(db_path)
+    else:
+        if data_source not in SUPPORTED_SOURCES:
+            raise ValueError("data.source must be one of %s, got: %s"
+                             % (SUPPORTED_SOURCES, data_source))
+        reader = DuckDBDailyReader(db_path, data_source=data_source)
 
     try:
         result = run_backtest(

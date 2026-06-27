@@ -1,0 +1,12 @@
+# coding: utf-8
+# V1.0 migrated by migrate_yaml_to_v10.py
+# P2-core100 grid: 扫 max_positions × min_score 8 个组合
+# Hermes 09 验收：用 core_100 跑首轮真实业绩对照（研究用，非实盘结论）
+
+batch:
+  id:   p2_core100_grid
+  base: backtest/configs/p2_core100.yaml
+
+grid:
+  strategy_params.max_positions:        [3, 5, 8]
+  strategy_params.min_score:             [55.0, 60.0]

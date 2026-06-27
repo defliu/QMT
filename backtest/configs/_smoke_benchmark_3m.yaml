@@ -1,16 +1,17 @@
 # V1.0 migrated by migrate_yaml_to_v10.py
 backtest:
-  name: real_4m
-  start_date: "2025-11-15"
-  end_date:   "2026-02-27"
+  name: smoke_benchmark_3m
+  start_date: "2026-03-02"
+  end_date:   "2026-06-11"
   initial_cash: 1000000.0
-  benchmark_code: null
+  benchmark_code: "000300.SH"
+  benchmark_db_path: "F:/backtest_workspace/data/duckdb/benchmark_index.duckdb"
 data:
-  source: jince_zhisuan
-  path:   "E:/金策智算/_internal/databases/duckdb/quantifydata.duckdb"
+  source: qmt_self_owned
+  path:   "F:/backtest_workspace/data/duckdb/qmt_market_data.duckdb"
   adjustment: hfq
 universe:
-  csv: "backtest/data/universe/strategy_pool_base.csv"
+  csv: "backtest/data/universe/_smoke_benchmark.csv"
 execution:
   price: next_open
   slippage: 0.001

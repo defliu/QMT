@@ -1,21 +1,29 @@
+# coding: utf-8
 # V1.0 migrated by migrate_yaml_to_v10.py
+# P2.1: top-100 PIT base config (qmt_self_owned + monthly PIT manifest, 105-pool)
+# 注意：top-100 在 105-code pool 上 churn 极小（+0~+2/月），主要作为对照下限。
+
 backtest:
-  name: real_4m
-  start_date: "2025-11-15"
-  end_date:   "2026-02-27"
+  name: p2_1_pit_top100
+  start_date: "2025-01-01"
+  end_date:   "2026-06-11"
   initial_cash: 1000000.0
   benchmark_code: null
+
 data:
-  source: jince_zhisuan
-  path:   "E:/金策智算/_internal/databases/duckdb/quantifydata.duckdb"
+  source: qmt_self_owned
+  path:   "F:/backtest_workspace/data/duckdb/qmt_market_data.duckdb"
   adjustment: hfq
+
 universe:
-  csv: "backtest/data/universe/strategy_pool_base.csv"
+  pit_manifest: "backtest/data/universe/pit_manifests/p2_1_pit_top100_monthly/index.json"
+
 execution:
   price: next_open
   slippage: 0.001
   commission_rate: 0.00025
   tax_rate: 0.0001
+
 strategy_params:
   max_positions: 5
   rebalance_policy: daily

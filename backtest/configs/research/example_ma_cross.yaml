@@ -1,9 +1,10 @@
 # coding: utf-8
+# V1.0 migrated by migrate_yaml_to_v10.py
 # Example: research/example_ma_cross strategy on baseline universe & dates
 # 5/10 均线金叉 minimal example —— 工厂演示价值，不是策略价值
 # SPEC: specs/SPEC_BACKTEST_FACTORY_V0.4_GENERALIZATION_PHASE1.md
 
-strategy_name: research/example_ma_cross
+strategy: research/example_ma_cross
 trading_model: next_open
 
 backtest:
@@ -28,5 +29,5 @@ execution:
   tax_rate: 0.0001
 
 # example 策略只读 max_positions，其他字段忽略即可
-strategy:
+strategy_params:
   max_positions: 5

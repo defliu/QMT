@@ -1,29 +1,25 @@
 # coding: utf-8
 # V1.0 migrated by migrate_yaml_to_v10.py
-# backtest factory v0.2 baseline config
-# Authoritative schema: SPEC_BACKTEST_MVP_OFFLINE_FACTORY_v0.2.md
+# P2-core100 baseline config (qmt_self_owned + core_100)
+# Hermes 验收依据：09_hermes_p0b1_acceptance.md
+# Authoritative spec: SPEC_BACKTEST_MVP_OFFLINE_FACTORY_v0.2.md
 # Authoritative output: 04_output_schema_freeze.md
 # Authoritative interface: 03_interface_freeze.md
 
-# v0.4 Strategy Registry (Phase 1 / Milestone A): 临时用 strategy_name 命名，
-# Milestone B 完成嵌套 strategy: 节迁移到 strategy_params: 后改回顶层 strategy:
-strategy: production/ima_uptrend_v31
-trading_model: next_open
-
 backtest:
-  name: baseline
-  start_date: "2025-09-02"
-  end_date:   "2025-09-26"
+  name: p2_core100
+  start_date: "2025-01-01"
+  end_date:   "2026-06-11"
   initial_cash: 1000000.0
-  benchmark_code: null            # decision E: benchmark disabled in v0.2
+  benchmark_code: null            # benchmark disabled (无指数数据)
 
 data:
-  source: jince_zhisuan           # OPEN_QUESTION (OQ-2): pending v0.3 rename
-  path:   "E:/金策智算/_internal/databases/duckdb/quantifydata.duckdb"
+  source: qmt_self_owned          # P2: 显式指定 qmt_self_owned；不改 reader 全局默认
+  path:   "F:/backtest_workspace/data/duckdb/qmt_market_data.duckdb"
   adjustment: hfq
 
 universe:
-  csv: "backtest/data/universe/strategy_pool_base.csv"
+  csv: "backtest/data/universe/core_100.csv"
 
 execution:
   price: next_open                # SPEC §2.2 default

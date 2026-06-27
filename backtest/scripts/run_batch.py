@@ -7,8 +7,8 @@ Reads an experiment yaml of the form:
       id:   baseline_grid
       base: backtest/configs/baseline.yaml
     grid:
-      strategy.max_positions: [3, 5]
-      strategy.min_score:      [55.0, 60.0]
+      strategy_params.max_positions: [3, 5]
+      strategy_params.min_score:      [55.0, 60.0]
 
 Expands `grid` into the full cartesian product, applies each combination on top
 of the base config, runs `run_backtest.main` per leaf, and aggregates a summary
@@ -119,10 +119,10 @@ def _run_one_leaf(leaf_cfg, batch_id, leaf_index, leaf_name):
     data_cfg = leaf_cfg.get("data", {})
     universe_cfg = leaf_cfg.get("universe", {})
     exec_cfg = leaf_cfg.get("execution", {})
-    strat_cfg = leaf_cfg.get("strategy", {})
+    strat_cfg = leaf_cfg.get("strategy_params", {})
 
-    # v0.4 Phase 1 / MS-A: 顶层 strategy_name + trading_model
-    v04_strategy_name = leaf_cfg.get("strategy_name") or "production/ima_uptrend_v31"
+    # V1.0 Phase 3: 顶层 strategy + trading_model
+    v04_strategy_name = leaf_cfg.get("strategy") or "production/ima_uptrend_v31"
     v04_trading_model = leaf_cfg.get("trading_model") or exec_cfg.get("price", "next_open")
 
     base_name = bt.get("name", "baseline")
@@ -147,10 +147,14 @@ def _run_one_leaf(leaf_cfg, batch_id, leaf_index, leaf_name):
 
     db_path = data_cfg.get("path", paths.JINCE_DB_PATH)
     data_source = data_cfg.get("source", JINCE_ZHISUAN)
-    if data_source not in SUPPORTED_SOURCES:
-        raise ValueError("data.source must be one of %s, got: %s"
-                         % (SUPPORTED_SOURCES, data_source))
-    reader = DuckDBDailyReader(db_path, data_source=data_source)
+    if data_source == "astock":
+        from backtest.data_tools.astock_reader import AstockParquetReader
+        reader = AstockParquetReader(db_path)
+    else:
+        if data_source not in SUPPORTED_SOURCES:
+            raise ValueError("data.source must be one of %s, got: %s"
+                             % (SUPPORTED_SOURCES, data_source))
+        reader = DuckDBDailyReader(db_path, data_source=data_source)
     try:
         result = run_backtest(
             reader=reader,
@@ -224,25 +228,68 @@ def _write_batch_summary(batch_id, batch_started, rows):
     return target
 
 
+def _checkpoint_path(batch_id):
+    """Return the checkpoint file path for a given batch_id."""
+    return os.path.join(paths.BATCH_DIR, batch_id + "_checkpoint.json").replace("\\", "/")
+
+
+def _load_checkpoint(batch_id):
+    """Load checkpoint dict {leaf_index: {results_dir, ...}} for a batch.
+
+    Returns dict mapping leaf_index (int) to checkpoint entry, or empty dict.
+    """
+    cp = _checkpoint_path(batch_id)
+    if not os.path.isfile(cp):
+        return {}
+    try:
+        with open(cp, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {entry["leaf_index"]: entry for entry in data.get("completed", [])}
+    except (json.JSONDecodeError, KeyError):
+        return {}
+
+
+def _save_checkpoint(batch_id, completed_entries):
+    """Write checkpoint file with all completed leaf entries."""
+    os.makedirs(paths.BATCH_DIR, exist_ok=True)
+    cp = _checkpoint_path(batch_id)
+    with open(cp, "w", encoding="utf-8") as f:
+        json.dump({"batch_id": batch_id, "completed": completed_entries}, f, indent=2)
+
+
 def main(argv=None):
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(description="Backtest factory v0.2 batch runner")
     parser.add_argument("--experiment", required=True,
                         help="path to experiment yaml (e.g. backtest/configs/experiments/baseline_grid.yaml)")
+    parser.add_argument("--resume", metavar="BATCH_ID",
+                        help="resume interrupted batch by batch_id; skip completed leaves")
     args = parser.parse_args(argv)
 
     init_workspace.ensure_workspace()
 
     exp_cfg = _load_yaml(args.experiment)
-    batch_id = exp_cfg["batch"]["id"]
+    batch_id = args.resume or exp_cfg["batch"]["id"]
     batch_started = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    checkpoint = _load_checkpoint(batch_id) if args.resume else {}
+    if checkpoint:
+        log.info("batch %s resuming: %d leaves already completed",
+                 batch_id, len(checkpoint))
 
     rows = []
     for idx, leaf_name, leaf_cfg in expand_grid(exp_cfg):
+        if idx in checkpoint:
+            log.info("batch %s leaf %d/%s skipped (already completed)",
+                     batch_id, idx, leaf_name)
+            rows.append(checkpoint[idx])
+            continue
         log.info("batch %s leaf %d/%s starting", batch_id, idx, leaf_name)
         row = _run_one_leaf(leaf_cfg, batch_id, idx, leaf_name)
         rows.append(row)
+        checkpoint[idx] = row
+        _save_checkpoint(batch_id, list(checkpoint.values()))
         log.info("batch %s leaf %d/%s done -> %s", batch_id, idx, leaf_name,
                  row["results_dir"])
 
