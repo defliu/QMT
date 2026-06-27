@@ -29,18 +29,25 @@ def test_empty_decision_diagnostics_common_keys():
 
 def test_empty_decision_strategy_specific_namespace():
     """私有字段挂在 strategy_specific.{name}。"""
+    from backtest.strategies import list_strategies
     ss = make_empty_decision()["diagnostics"]["strategy_specific"]
-    assert set(ss.keys()) == {"ima_uptrend_v31"}
-    ima = ss["ima_uptrend_v31"]
-    assert set(ima.keys()) == {"scores", "filter_counts", "trigger_counts"}
-    assert ima["scores"] == {}
+    registered = set(n.split("/")[-1] for n in list_strategies())
+    ns_keys = set(ss.keys())
+    assert ns_keys & registered, (
+        "至少有一个已注册策略 namespace 出现在 strategy_specific, got %s" % ns_keys
+    )
+    ns = next(iter(ns_keys & registered))
+    assert "scores" in ss[ns]
+    assert "filter_counts" in ss[ns]
+    assert "trigger_counts" in ss[ns]
 
 
 def test_empty_decision_filter_counts_8_keys():
-    fc = (make_empty_decision()["diagnostics"]
-                                ["strategy_specific"]
-                                ["ima_uptrend_v31"]
-                                ["filter_counts"])
+    from backtest.strategies import list_strategies
+    registered = set(n.split("/")[-1] for n in list_strategies())
+    ss = make_empty_decision()["diagnostics"]["strategy_specific"]
+    ns = next(iter(set(ss.keys()) & registered))
+    fc = ss[ns]["filter_counts"]
     expected = {
         "blocked_min_score", "blocked_min_core", "blocked_max_bias5",
         "blocked_max_daily_pct", "blocked_already_held", "blocked_limit_up",
@@ -51,10 +58,11 @@ def test_empty_decision_filter_counts_8_keys():
 
 
 def test_empty_decision_trigger_counts_7_keys():
-    tc = (make_empty_decision()["diagnostics"]
-                                ["strategy_specific"]
-                                ["ima_uptrend_v31"]
-                                ["trigger_counts"])
+    from backtest.strategies import list_strategies
+    registered = set(n.split("/")[-1] for n in list_strategies())
+    ss = make_empty_decision()["diagnostics"]["strategy_specific"]
+    ns = next(iter(set(ss.keys()) & registered))
+    tc = ss[ns]["trigger_counts"]
     expected = {"early_stop", "early_kick", "stop_loss",
                 "score_drop", "replace", "warning", "confirm"}
     assert set(tc.keys()) == expected

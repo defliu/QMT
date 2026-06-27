@@ -46,8 +46,59 @@ def get_strategy_diag(decision, strategy_name, key, default=None):
                     .get(key, default))
 
 
-# 触发注册：import 子包即可
-from backtest.strategies.production import ima_uptrend_v31  # noqa: F401
-# Research strategies（按需逐个 import）
-from backtest.strategies.research import example_ma_cross  # noqa: F401
-from backtest.strategies.research import huang_zhongjun_combo  # noqa: F401
+import contextlib
+
+
+def register_test_spy(name, fn):
+    """测试辅助：直接向 registry 注入临时 fn，返回前一版本供还原。"""
+    old = _REGISTRY.get(name)
+    _REGISTRY[name] = fn
+    return old
+
+
+@contextlib.contextmanager
+def strategy_spy(name, fn=None):
+    """测试辅助：上下文管理器，临时替换 registry 中 name 对应的 evaluate_day。
+    退出时 try/finally 自动还原，不污染生产 registry。
+
+    用法 1（替换已注册策略，spy 包装原 fn）:
+        with strategy_spy("production/ima_uptrend_v31") as (real_fn, spy_fn): ...
+    用法 2（注入新临时策略 fn，退出时删除）:
+        with strategy_spy("test/my_spy", fn=my_evaluate_day) as (None, my_evaluate_day): ...
+    """
+    existed = name in _REGISTRY
+    real = _REGISTRY.get(name)
+    injected = fn if fn is not None else real
+    if injected is None:
+        raise KeyError("strategy_spy: name=%r not registered and fn not given" % name)
+    captured = [None]
+
+    def _spy(*args, **kwargs):
+        captured[0] = args
+        return injected(*args, **kwargs)
+
+    _REGISTRY[name] = _spy
+    try:
+        yield real, _spy
+    finally:
+        if existed:
+            _REGISTRY[name] = real
+        else:
+            _REGISTRY.pop(name, None)
+
+
+# 触发注册：自动扫描 production/ 和 research/ 子包
+import importlib
+import pkgutil
+
+
+def _autodiscover():
+    for cat in ("production", "research"):
+        pkg = importlib.import_module("backtest.strategies." + cat)
+        for _, modname, ispkg in pkgutil.iter_modules(pkg.__path__):
+            if ispkg:
+                importlib.import_module(
+                    "backtest.strategies.%s.%s.strategy" % (cat, modname))
+
+
+_autodiscover()

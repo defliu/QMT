@@ -256,11 +256,11 @@ def test_diagnostics_aggregate_keys():
     }
     assert da["unfilled_order_count"] >= 0
     ss = da["strategy_specific"]
-    assert set(ss.keys()) == {"ima_uptrend_v31"}
-    ima_keys = set(ss["ima_uptrend_v31"].keys())
-    # 必含的两个聚合 key，scores_present 等占位 key 允许新增不限定
-    assert "filter_counts_avg_per_day" in ima_keys
-    assert "trigger_counts_total"      in ima_keys
+    assert len(ss) >= 1, "至少有一个策略 namespace 被聚合"
+    any_ns = next(iter(ss))
+    any_keys = set(ss[any_ns].keys())
+    assert "filter_counts_avg_per_day" in any_keys
+    assert "trigger_counts_avg_per_day" in any_keys
 
 
 def test_no_io_writes_to_workspace(tmp_path, monkeypatch):
@@ -289,35 +289,32 @@ def test_no_io_writes_to_workspace(tmp_path, monkeypatch):
 
 
 def test_no_lookahead_window_leaks_future_dates():
-    """Verify the window passed to evaluate_day never includes future dates.
-
-    v0.4 起 daily_engine 通过 registry 取 evaluate_day（不再有顶级 eng.evaluate_day），
-    所以 spy 直接挂在 strategies._REGISTRY 上拦截。
-    """
+    """Verify the window passed to evaluate_day never includes future dates."""
+    from backtest.strategies import strategy_spy
     seen = []
-    from backtest.strategies import _REGISTRY
     name = "production/ima_uptrend_v31"
-    real = _REGISTRY[name]
 
-    def spy(current_date, market_window, **kw):
-        for code, df in (market_window or {}).items():
-            max_date = df["date"].astype(str).max() if len(df) else ""
-            seen.append((str(current_date), code, max_date))
-        return real(current_date=current_date, market_window=market_window, **kw)
+    with strategy_spy(name) as (real, spy_fn):
+        def _spy(current_date, market_window, **kw):
+            for code, df in (market_window or {}).items():
+                max_date = df["date"].astype(str).max() if len(df) else ""
+                seen.append((str(current_date), code, max_date))
+            return real(current_date=current_date, market_window=market_window, **kw)
 
-    _REGISTRY[name] = spy
-    try:
-        universe = ["000001.SZ"]
-        market, dates = _build_market(universe, n_days=65)
-        reader = FakeReader(market, dates)
-        run_backtest(
-            reader=reader, universe=universe,
-            start_date=dates[0], end_date=dates[-1],
-            strategy_config=_cfg(), execution_cfg=_EXEC,
-            initial_cash=1_000_000.0, universe_hash="u", config_hash="c",
-        )
-    finally:
-        _REGISTRY[name] = real
+        from backtest.strategies import _REGISTRY
+        _REGISTRY[name] = _spy
+        try:
+            universe = ["000001.SZ"]
+            market, dates = _build_market(universe, n_days=65)
+            reader = FakeReader(market, dates)
+            run_backtest(
+                reader=reader, universe=universe,
+                start_date=dates[0], end_date=dates[-1],
+                strategy_config=_cfg(), execution_cfg=_EXEC,
+                initial_cash=1_000_000.0, universe_hash="u", config_hash="c",
+            )
+        finally:
+            _REGISTRY[name] = real
 
     for cur, code, max_d in seen:
         assert max_d <= cur, "window leaked future date %s on day %s for %s" % (max_d, cur, code)

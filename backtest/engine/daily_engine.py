@@ -143,30 +143,6 @@ def _slice_window_up_to(market_data, today):
     return out
 
 
-def _avg_filter_counts(daily_filter_counts, n_days):
-    if n_days <= 0:
-        return {}
-    keys = set()
-    for fc in daily_filter_counts:
-        keys.update(fc.keys())
-    out = {}
-    for k in keys:
-        total = sum(fc.get(k, 0) for fc in daily_filter_counts)
-        out[k] = round(float(total) / float(n_days), 6)
-    return out
-
-
-def _sum_trigger_counts(daily_trigger_counts):
-    keys = set()
-    for tc in daily_trigger_counts:
-        keys.update(tc.keys())
-    out = {k: 0 for k in keys}
-    for tc in daily_trigger_counts:
-        for k, v in tc.items():
-            out[k] += int(v)
-    return out
-
-
 def _unique_warnings(daily_warnings):
     seen = []
     seen_set = set()
@@ -223,12 +199,7 @@ def _aggregate_strategy_specific(daily_ss, n_days):
                         if isinstance(sk, dict):
                             total += float(sk.get(ik, 0) or 0)
                     agg[ik] = round(total / float(n_days), 6)
-                if sub_key == "trigger_counts":
-                    sname_out["trigger_counts_total"] = {
-                        k: int(round(v * n_days)) for k, v in agg.items()
-                    }
-                else:
-                    sname_out[sub_key + "_avg_per_day"] = agg
+                sname_out[sub_key + "_avg_per_day"] = agg
             else:
                 sname_out[sub_key + "_present"] = True
         out[sname] = sname_out
@@ -356,8 +327,6 @@ def run_backtest(
     equity_rows = []
     positions_rows = []
     daily_logs = []
-    daily_filter_counts = []
-    daily_trigger_counts = []
     daily_warnings = []
     daily_candidate_total = []
     daily_candidate_passed = []
@@ -457,10 +426,6 @@ def run_backtest(
             # v0.4 策略私有字段：按 namespace 整体采集，支持任意策略
             ss_today = diag.get("strategy_specific", {}) or {}
             daily_strategy_specific.append(ss_today)
-            # 兼容旧 6+2 通路（被某些测试 fixture 引用）：从 ima_uptrend_v31 namespace 提取
-            _ima = ss_today.get("ima_uptrend_v31", {}) or {}
-            daily_filter_counts.append(_ima.get("filter_counts", {}) or {})
-            daily_trigger_counts.append(_ima.get("trigger_counts", {}) or {})
             for line in decision.get("logs", []):
                 daily_logs.append("[INFO]  " + line)
             pending = decision

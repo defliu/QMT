@@ -150,31 +150,29 @@ def test_pit_universe_by_date_forward_fills():
         dates[7]: ["BBB", "CCC"],
     }
 
-    # spy 拦截 evaluate_day，记录每天收到的 universe
     seen = []
-    from backtest.strategies import _REGISTRY
+    from backtest.strategies import strategy_spy
     name = "production/ima_uptrend_v31"
-    real = _REGISTRY[name]
 
-    def spy(current_date, market_window, universe=None, **kw):
-        seen.append((str(current_date), list(universe or [])))
-        return real(current_date=current_date, market_window=market_window,
-                    universe=universe, **kw)
+    with strategy_spy(name) as (real, spy_fn):
+        def _spy(current_date, market_window, universe=None, **kw):
+            seen.append((str(current_date), list(universe or [])))
+            return real(current_date=current_date, market_window=market_window,
+                        universe=universe, **kw)
 
-    _REGISTRY[name] = spy
-    try:
-        run_backtest(
-            reader=reader, universe=codes,
-            start_date=dates[0], end_date=dates[-1],
-            strategy_config={"max_positions": 5}, execution_cfg=_EXEC,
-            initial_cash=1_000_000.0, universe_hash="u", config_hash="c",
-            universe_by_date=universe_by_date,
-        )
-    finally:
-        _REGISTRY[name] = real
+        from backtest.strategies import _REGISTRY
+        _REGISTRY[name] = _spy
+        try:
+            run_backtest(
+                reader=reader, universe=codes,
+                start_date=dates[0], end_date=dates[-1],
+                strategy_config={"max_positions": 5}, execution_cfg=_EXEC,
+                initial_cash=1_000_000.0, universe_hash="u", config_hash="c",
+                universe_by_date=universe_by_date,
+            )
+        finally:
+            _REGISTRY[name] = real
 
-    # 检查：dates[0..6] 应都看到 [AAA, BBB]，dates[7..13] 应都看到 [BBB, CCC]
-    # （注意 evaluate_day 在最后一天不调，所以 seen 长度 = n_days - 1 = 14）
     early = [u for d, u in seen if d <= dates[6]]
     late  = [u for d, u in seen if d >= dates[7] and d < dates[-1]]
     assert early, "dates[0..6] 应有 evaluate 调用"
@@ -195,28 +193,28 @@ def test_pit_first_day_before_first_snapshot_is_empty():
     universe_by_date = {dates[4]: ["AAA"]}
 
     seen = []
-    from backtest.strategies import _REGISTRY
+    from backtest.strategies import strategy_spy
     name = "production/ima_uptrend_v31"
-    real = _REGISTRY[name]
 
-    def spy(current_date, market_window, universe=None, **kw):
-        seen.append((str(current_date), list(universe or [])))
-        return real(current_date=current_date, market_window=market_window,
-                    universe=universe, **kw)
+    with strategy_spy(name) as (real, spy_fn):
+        def _spy(current_date, market_window, universe=None, **kw):
+            seen.append((str(current_date), list(universe or [])))
+            return real(current_date=current_date, market_window=market_window,
+                        universe=universe, **kw)
 
-    _REGISTRY[name] = spy
-    try:
-        run_backtest(
-            reader=reader, universe=codes,
-            start_date=dates[0], end_date=dates[-1],
-            strategy_config={"max_positions": 5}, execution_cfg=_EXEC,
-            initial_cash=1_000_000.0, universe_hash="u", config_hash="c",
-            universe_by_date=universe_by_date,
-        )
-    finally:
-        _REGISTRY[name] = real
+        from backtest.strategies import _REGISTRY
+        _REGISTRY[name] = _spy
+        try:
+            run_backtest(
+                reader=reader, universe=codes,
+                start_date=dates[0], end_date=dates[-1],
+                strategy_config={"max_positions": 5}, execution_cfg=_EXEC,
+                initial_cash=1_000_000.0, universe_hash="u", config_hash="c",
+                universe_by_date=universe_by_date,
+            )
+        finally:
+            _REGISTRY[name] = real
 
-    # dates[0..3] 应都是空 universe
     pre = [u for d, u in seen if d < dates[4]]
     post = [u for d, u in seen if d >= dates[4] and d < dates[-1]]
     assert pre, "dates[0..3] 应有 evaluate 调用"
