@@ -1,0 +1,33 @@
+# IMA Main Uptrend Wave V3.1 -- Base Config
+# SPEC v0.1 compliant
+
+research:
+  name: "ima_uptrend_v31_signal_research"
+  start_date: "2025-09-01"
+  end_date: "2026-02-27"
+  horizons: [1, 3, 5, 10]
+
+strategy:
+  sc_threshold: 7
+  h1_mode: "disabled"
+
+hard_filters:
+  gain_3d_min: 5
+  gain_3d_max: 25
+  deep_pit_amplitude_18d: 16
+  rush_3d_ratio: 1.13
+  volume_ceiling_multiple: 5
+
+factors:
+  volume_expand_multiple: 1.5
+  breakout_20h_ratio: 0.998
+  rsi_min: 45
+  rsi_max: 80
+  ma_convergence_max: 5
+  volatility_contraction_max: 5
+
+execution_observation:
+  entry: "next_open"
+
+output:
+  workspace_root: "F:/backtest_workspace"
