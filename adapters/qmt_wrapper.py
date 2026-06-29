@@ -30,17 +30,90 @@ from core.signal_main_rise import SECTOR_HOT_TOP_N
 from core.risk_manager import Action, SellDecision, SellPositionState, SellStrategyEngine, get_trade_state_reason, format_plan_b_diagnosis
 
 
+_DEFAULT_CONFIG = {
+    'paths': {},
+    'safemode': {
+        'enabled': False,
+        'log_dir': 'D:/QMT_POOL/safemode_logs/',
+        'block_passorder': True,
+        'block_file_write': False,
+    },
+    'debug_mode': {'enabled': False},
+    'strategy': {'capital_base': 100000},
+}
+
+
+def _lightweight_yaml_parse(text):
+    """轻量 YAML 解析，仅支持本项目 global_config.yaml 的简单格式。
+
+    支持：顶层 section、key: value、bool、数字、字符串路径。
+    """
+    result = {}
+    current_section = None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if ':' not in line:
+            continue
+        key, _, value = line.partition(':')
+        key = key.rstrip()
+        value = value.strip()
+        if not value:
+            current_section = key
+            result.setdefault(current_section, {})
+            continue
+        val = value.strip('"').strip("'")
+        if val.lower() in ('true', 'yes'):
+            parsed = True
+        elif val.lower() in ('false', 'no'):
+            parsed = False
+        else:
+            try:
+                parsed = int(val)
+            except ValueError:
+                try:
+                    parsed = float(val)
+                except ValueError:
+                    parsed = val
+        if current_section is not None:
+            result[current_section][key] = parsed
+        else:
+            result[key] = parsed
+    return result
+
+
 def _load_config():
-    """从 config/global_config.yaml 加载路径和 safemode 配置"""
-    import yaml
-    # QMT 的 exec() 环境没有 __file__，回退到绝对路径
+    """从 config/global_config.yaml 加载路径和 safemode 配置。
+
+    PyYAML 可用时使用 yaml.safe_load；不可用时使用内置轻量解析器。
+    配置文件缺失/读取失败/解析失败时，返回内置默认配置。
+    """
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = os.path.join(os.path.dirname(script_dir), 'config', 'global_config.yaml')
     except NameError:
         config_path = 'D:/QMT_STRATEGIES/config/global_config.yaml'
-    with open(config_path, encoding='utf-8') as f:
-        cfg = yaml.safe_load(f) or {}
+
+    try:
+        with open(config_path, encoding='utf-8') as f:
+            text = f.read()
+    except Exception as e:
+        print('[配置] 读取配置失败，使用内置默认配置: %s' % e)
+        return dict(_DEFAULT_CONFIG)
+
+    try:
+        import yaml
+        cfg = yaml.safe_load(text) or {}
+    except ImportError:
+        print('[配置] PyYAML 不可用，使用内置默认配置')
+        cfg = _lightweight_yaml_parse(text)
+    except Exception as e:
+        print('[配置] YAML 解析失败，使用内置默认配置: %s' % e)
+        cfg = _lightweight_yaml_parse(text)
+
+    if not cfg:
+        cfg = dict(_DEFAULT_CONFIG)
     return cfg
 
 _full_config = _load_config()
@@ -302,7 +375,13 @@ class Trader:
         if vol < 100:
             print("[交易] 买入 %s 数量不足100股: %s" % (stock_code, volume))
             return None
-        return self._passorder(self.BUY_CODE, stock_code, vol, remark)
+        t_before = time.time()
+        self._passorder(self.BUY_CODE, stock_code, vol, remark)
+        order_id = self._lookup_recent_order_id(stock_code, vol, 'buy', t_before)
+        if order_id is None:
+            print("  [买入反查失败] %s %d股 委托可能未到达交易所" % (stock_code, vol))
+            return None
+        return order_id
 
     def sell(self, stock_code, volume, remark='', use_market=False):
         """
@@ -350,7 +429,7 @@ class Trader:
     def _lookup_recent_order_id(self, stock_code, expected_vol, direction, t_before):
         """
         passorder 调用后反查委托簿，找到刚刚下的那笔委托的 m_nOrderID。
-        v2: 已实现 direction（用 m_strOptName 判方向）和 t_before（用 m_strInsertTime HHMMSS 比较）过滤。
+        v3: remark 不再硬过滤，仅作为多候选优先级信号。
 
         stock_code: '600110.SH'
         expected_vol: 期望股数（与 passorder 传入的 vol 一致）
@@ -360,10 +439,11 @@ class Trader:
         过滤条件（全部 AND）：
           1. stock_code 匹配
           2. vol == expected_vol
-          3. strategy_name in remark
-          4. status not in (54, 55, 57)
-          5. direction: m_strOptName 含 '卖'/'买'；字段为空时放宽不卡
-          6. t_before: m_strInsertTime HHMMSS >= t_before HHMMSS - 1；解析失败时放宽不卡
+          3. status not in (54, 55, 57)
+          4. direction: m_strOptName 含 '卖'/'买'；字段为空时放宽不卡
+          5. t_before: m_strInsertTime HHMMSS >= t_before HHMMSS - 1；解析失败时放宽不卡
+
+        多候选排序：remark 含 strategy_name 优先；同级按插入时间越近越优先。
 
         返回 m_nOrderID（int）；找不到返回 None。
         """
@@ -377,6 +457,7 @@ class Trader:
             t_before_hms = t_struct.tm_hour * 10000 + t_struct.tm_min * 100 + t_struct.tm_sec
             t_threshold_hms = t_before_hms - 1
 
+            candidates = []
             for o in reversed(orders):
                 code = "%s.%s" % (getattr(o, 'm_strInstrumentID', ''), getattr(o, 'm_strExchangeID', ''))
                 if code != stock_code:
@@ -384,9 +465,6 @@ class Trader:
 
                 vol = getattr(o, 'm_nOrderVolume', 0)
                 if vol != expected_vol:
-                    continue
-
-                if self.strategy_name not in getattr(o, 'm_strRemark', ''):
                     continue
 
                 status = getattr(o, 'm_nOrderStatus', None)
@@ -400,6 +478,7 @@ class Trader:
                     continue
 
                 ot_str = getattr(o, 'm_strInsertTime', '')
+                ot_hms = None
                 if ot_str:
                     try:
                         ot_hms = int(ot_str[-6:])
@@ -408,9 +487,15 @@ class Trader:
                     if ot_hms is not None and ot_hms < t_threshold_hms:
                         continue
 
-                return getattr(o, 'm_nOrderID', None)
+                remark = getattr(o, 'm_strRemark', '')
+                remark_match = 1 if self.strategy_name in remark else 0
+                candidates.append((remark_match, ot_hms if ot_hms is not None else -1, o))
 
-            return None
+            if not candidates:
+                return None
+
+            candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+            return getattr(candidates[0][2], 'm_nOrderID', None)
         except Exception as e:
             print("  [反查订单] %s 失败: %s" % (stock_code, e))
             return None
@@ -1971,7 +2056,8 @@ def _check_pre_market_hard_stop(C, today, now):
         print("    [预埋扫描] %s grade=%s ref=%.2f prev=%.2f drop=%.2f%% pnl=%.2f%% shares=%d"
               % (code, grade, ref_price, prev_close, daily_drop * 100, cum_pnl * 100, shares))
 
-        if shares < 100:
+        sell_vol = _normalize_sell_volume_for_board(code, shares, shares, True)
+        if sell_vol <= 0:
             continue
         if grade in ('G0', 'G1'):
             continue
@@ -1986,11 +2072,11 @@ def _check_pre_market_hard_stop(C, today, now):
         order_id = None
         try:
             if hasattr(_g_trader, 'sell_limit_price'):
-                order_id = _g_trader.sell_limit_price(code, shares, limit_price,
+                order_id = _g_trader.sell_limit_price(code, sell_vol, limit_price,
                                                       remark='预埋%s' % grade)
             else:
                 order_id = _g_trader._passorder(
-                    _g_trader.SELL_CODE, code, shares,
+                    _g_trader.SELL_CODE, code, sell_vol,
                     '预埋%s' % grade, price_type=0, price=limit_price)
         except Exception as e:
             print("    [预埋下单异常] %s grade=%s: %s" % (code, grade, e))
@@ -1999,18 +2085,58 @@ def _check_pre_market_hard_stop(C, today, now):
         if order_id is not None:
             _g_premarket_orders[code] = {
                 'order_id': order_id, 'grade': grade,
-                'price': limit_price, 'shares': shares,
+                'price': limit_price, 'shares': sell_vol,
                 'ref_price': ref_price,
             }
             print("    [预埋下单] %s grade=%s %d股@%.2f order=%s"
-                  % (code, grade, shares, limit_price, order_id))
-            _append_log('集合竞价预埋: %s grade=%s %d股@%.2f' % (code, grade, shares, limit_price))
+                  % (code, grade, sell_vol, limit_price, order_id))
+            _append_log('集合竞价预埋: %s grade=%s %d股@%.2f' % (code, grade, sell_vol, limit_price))
         else:
             print("    [预埋失败] %s grade=%s" % (code, grade))
 
     _g_premarket_check_done = True
     print("  [%s] 集合竞价预埋扫描完成 (下单 %d 只)"
           % (STRATEGY_NAME, len(_g_premarket_orders)))
+
+
+# ============================================================
+#  卖出数量合法性
+# ============================================================
+
+def _is_star_market_stock(code):
+    base = str(code).upper()
+    if '.' in base:
+        base = base.split('.')[0]
+    if base.startswith('SH') or base.startswith('SZ'):
+        base = base[2:]
+    return base.startswith('688') or base.startswith('689')
+
+
+def _min_sell_volume_for_board(code):
+    if _is_star_market_stock(code):
+        return 200
+    return 100
+
+
+def _normalize_sell_volume_for_board(code, desired_vol, available_vol, is_clear=False):
+    available_vol = int(available_vol)
+    desired_vol = int(desired_vol)
+    if available_vol <= 0:
+        return 0
+    if is_clear:
+        return available_vol
+    if _is_star_market_stock(code):
+        if available_vol < 200:
+            return available_vol
+        if desired_vol < 200:
+            return min(200, available_vol)
+        return min(desired_vol, available_vol)
+    if desired_vol >= 100:
+        lot = (min(desired_vol, available_vol) // 100) * 100
+        return lot
+    if available_vol < 100:
+        return available_vol
+    return 0
 
 
 # ============================================================
@@ -2086,7 +2212,14 @@ def _check_and_execute_sell(C, today, allowed_layers=None):
             sells.append({'code': code, 'reasons': [dec.reason], 'pct': dec.sell_pct, 'volume': 0})
             continue
 
-        if shares < 100:
+        pos = _g_trader.get_position(code)
+        available = pos['can_use'] if pos else shares
+        is_clear = (dec.action == Action.CLEAR)
+        sell_vol = _normalize_sell_volume_for_board(code, shares, available, is_clear)
+        if sell_vol <= 0:
+            if code not in _g_sell_skip_printed:
+                _g_sell_skip_printed.add(code)
+                print("  [卖出跳过] %s 数量不满足最低委托量 desired=%d available=%d" % (code, shares, available))
             continue
 
         price = _get_current_price(code, C)
@@ -2096,28 +2229,28 @@ def _check_and_execute_sell(C, today, allowed_layers=None):
                 print("  [卖出跳过] %s 无法获取当前价" % code)
             continue
 
-        order_id = _g_trader.sell(code, shares, remark='卖出简易')
+        order_id = _g_trader.sell(code, sell_vol, remark='卖出简易')
         if order_id is not None:
             state_obj = _g_sell_engine._states.get(code)
             _g_pending_sells[code] = {
                 'order_id': order_id,
-                'volume': shares,
+                'volume': sell_vol,
                 'sell_price': price,
                 'cost': state_obj.cost_price if state_obj else 0,
                 'pct': dec.sell_pct,
                 'checks': 0,
                 'retries': 0,
-                'is_clear': (dec.action == Action.CLEAR),
+                'is_clear': is_clear,
                 'code': code,
                 'today': today,
             }
-            print("    [卖出委托] %s %d股 价格=%.2f  原因=%s" % (code, shares, price, dec.reason))
-            _append_log('卖出委托: %s %d股, 原因=%s' % (code, shares, dec.reason))
-            sells.append({'code': code, 'reasons': [dec.reason], 'pct': dec.sell_pct, 'volume': shares})
+            print("    [卖出委托] %s %d股 价格=%.2f  原因=%s" % (code, sell_vol, price, dec.reason))
+            _append_log('卖出委托: %s %d股, 原因=%s' % (code, sell_vol, dec.reason))
+            sells.append({'code': code, 'reasons': [dec.reason], 'pct': dec.sell_pct, 'volume': sell_vol})
         else:
             _g_failed_printed.add(code)
             _g_sell_fail_cooldown[code] = now_ts
-            print("    [卖出委托失败] %s %d股  原因=%s (60秒冷却)" % (code, shares, dec.reason))
+            print("    [卖出委托失败] %s %d股  原因=%s (60秒冷却)" % (code, sell_vol, dec.reason))
 
     return sells
 
@@ -2270,8 +2403,8 @@ def _check_limitdown_sells(C, today):
                             remaining_vol = info.get('volume', 0)
                             pos = _g_trader.get_position(code)
                             available = pos['can_use'] if pos else 0
-                            sell_vol = min(remaining_vol, available)
-                            if sell_vol >= 100:
+                            sell_vol = _normalize_sell_volume_for_board(code, remaining_vol, available, True)
+                            if sell_vol > 0:
                                 order_id = _g_trader.sell(code, sell_vol, remark='跌停强卖')
                                 if order_id is not None:
                                     _g_pending_sells[code] = dict(
@@ -2287,7 +2420,7 @@ def _check_limitdown_sells(C, today):
                                 else:
                                     print("  [跌停强卖] %s 强制卖出委托失败" % code)
                             else:
-                                print("  [跌停强卖] %s 可卖数量不足100股，清理记录" % code)
+                                print("  [跌停强卖] %s 可卖数量不足最低委托量，清理记录" % code)
                                 _g_pending_limitdown_sells.pop(code, None)
                         else:
                             print("  [跌停强卖] %s 无法获取当前价格" % code)
@@ -2299,8 +2432,8 @@ def _check_limitdown_sells(C, today):
                 remaining_vol = info.get('volume', 0)
                 pos = _g_trader.get_position(code)
                 available = pos['can_use'] if pos else 0
-                sell_vol = min(remaining_vol, available)
-                if sell_vol >= 100:
+                sell_vol = _normalize_sell_volume_for_board(code, remaining_vol, available, True)
+                if sell_vol > 0:
                     order_id = _g_trader.sell(code, sell_vol, remark='跌停放行')
                     if order_id is not None:
                         _g_pending_sells[code] = dict(
@@ -2315,7 +2448,7 @@ def _check_limitdown_sells(C, today):
                     else:
                         print("  [跌停放行] %s 恢复卖出委托失败" % code)
                 else:
-                    print("  [跌停放行] %s 可卖数量不足100股，清理记录" % code)
+                    print("  [跌停放行] %s 可卖数量不足最低委托量，清理记录" % code)
                     _g_pending_limitdown_sells.pop(code, None)
             else:
                 print("  [跌停放行] %s 无法获取当前价格" % code)
@@ -2358,7 +2491,7 @@ def _retry_pending_sell(code, info, C):
 
     pos = _g_trader.get_position(code)
     available = pos['can_use'] if pos else 0
-    new_vol = min(info['volume'], available)
+    new_vol = _normalize_sell_volume_for_board(code, info['volume'], available, info.get('is_clear', False))
     if new_vol <= 0:
         print("    -> %s 已无可卖持仓，清理记录" % code)
         _g_pending_sells.pop(code, None)
