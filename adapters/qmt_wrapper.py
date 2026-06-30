@@ -238,6 +238,15 @@ _g_retry_skip_printed = set()    # 已打印过"[卖出重试]"的股票
 _g_failed_printed = set()          # 当日卖出委托失败的股票，避免重复尝试
 _g_sell_fail_cooldown = {}         # {code: timestamp} 卖出失败60秒冷却
 
+# 卖出委托 passorder 后反查 order_id 的短轮询参数
+# QMT 异步分配 order_id 有 ~100ms 延迟，撞窗口内会查不到，轮询几次等它落地
+SELL_LOOKUP_RETRIES = 4       # 反查次数（含首次）
+SELL_LOOKUP_INTERVAL = 0.2    # 每次间隔秒（4次x0.2s=最多等 0.8s，覆盖 100ms 延迟有余）
+
+# 买入委托 passorder 后反查 order_id 的短轮询参数（同卖出）
+BUY_LOOKUP_RETRIES = 4
+BUY_LOOKUP_INTERVAL = 0.2
+
 # ============================================================
 #  策略日志缓冲区
 # ============================================================
@@ -380,7 +389,14 @@ class Trader:
             return None
         t_before = time.time()
         self._passorder(self.BUY_CODE, stock_code, vol, remark)
-        order_id = self._lookup_recent_order_id(stock_code, vol, 'buy', t_before)
+        # passorder 已发出，QMT 异步分配 order_id 有 ~100ms 延迟；
+        # 即时反查一次可能撞在分配窗口内查不到，短轮询几次再判失败
+        order_id = None
+        for _attempt in range(BUY_LOOKUP_RETRIES):
+            order_id = self._lookup_recent_order_id(stock_code, vol, 'buy', t_before)
+            if order_id is not None:
+                break
+            time.sleep(BUY_LOOKUP_INTERVAL)
         if order_id is None:
             print("  [买入反查失败] %s %d股 委托可能未到达交易所" % (stock_code, vol))
             return None
@@ -414,7 +430,15 @@ class Trader:
             else:
                 self._passorder(self.SELL_CODE, stock_code, vol, remark, price_type=0, price=sell_price)
 
-        order_id = self._lookup_recent_order_id(stock_code, vol, 'sell', t_before)
+        # passorder 已发出，QMT 异步分配 order_id 有 ~100ms 延迟；
+        # 即时反查一次可能撞在分配窗口内查不到，短轮询几次再判失败
+        # （0630 600641 bug：即时反查撞 100ms 窗口判失败→不登记_g_pending_sells→单子真成交策略不知道）
+        order_id = None
+        for _attempt in range(SELL_LOOKUP_RETRIES):
+            order_id = self._lookup_recent_order_id(stock_code, vol, 'sell', t_before)
+            if order_id is not None:
+                break
+            time.sleep(SELL_LOOKUP_INTERVAL)
         if order_id is None:
             print("  [卖出反查失败] %s %d股 委托可能未到达交易所，按失败处理" % (stock_code, vol))
             return None
