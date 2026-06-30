@@ -137,6 +137,7 @@ _strategy_config = _full_config.get('strategy', {})
 
 ACCOUNT_ID = '67014907'
 STRATEGY_NAME = '双带主升浪_尾盘_外部池_beat四层版'
+STRATEGY_VERSION = 'v2026.06.30-f1f5-lookup'
 
 STRATEGY_CAPITAL = float(_strategy_config.get('capital_base', 100000))
 MAX_HOLD = 3
@@ -3554,6 +3555,7 @@ class StrategyRunner(object):
             print("  [时间校验] 异常: %s" % e)
         _g_init_done = True
         print("[%s] 初始化完成  账号=%s" % (STRATEGY_NAME, ACCOUNT_ID))
+        print("[%s] 策略版本=%s" % (STRATEGY_NAME, STRATEGY_VERSION))
         print("[%s] 策略本金=%d  累计盈亏=%+.0f  当前净值=%.0f" % (
             STRATEGY_NAME, STRATEGY_CAPITAL, _g_cumulative_pnl, current_nav))
         print("[%s] 持仓上限=%d只  %s" % (
