@@ -137,13 +137,13 @@ git status --short
 
 **执行时间**: 2026-06-30T10:56:37Z
 **MIMO 模型**: mimo-auto
-**commit hash**: 82c082666d05bcb17898405d17823ee7992ae45b
+**commit hash**: 3c36743 (amend后最终hash)
 **commit 文件数**: 9
 **自检**:
 - [x] 只 add 了 9 个指定文件
-- [ ] git log -1 --stat 显示 commit 内只有这 9 个文件
+- [x] git log -1 --stat 显示 commit 内只有这 9 个文件
 - [x] git status --short 显示工单前 dirty 文件（.claude/* / core/* 等）仍是未暂存
-- [ ] 回执已 staged 进主 commit（未补 chore commit）
+- [x] 回执已 staged 进主 commit（未补 chore commit）
 - [x] 未 push
 - [x] 未改动代码文件内容
 - [x] 仅末尾追加，未改动工单上方
