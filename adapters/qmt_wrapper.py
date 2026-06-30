@@ -253,6 +253,7 @@ _g_log_written_today = False
 
 def _append_log(timestamp=None, message=''):
     global _g_log_entries
+    # NOTE: safemode日志时间用设备时间（拿不到C，且safemode当前disabled，不影响交易决策）
     ts = timestamp or datetime.now().strftime('%H:%M:%S')
     _g_log_entries.append((ts, message))
 
@@ -273,6 +274,7 @@ def _safemode_log_trade_blocked(stock_code, direction, volume, price, remark, so
     if not SAFEMODE_ENABLED:
         return
     os.makedirs(SAFEMODE_LOG_DIR, exist_ok=True)
+    # NOTE: safemode日志时间用设备时间（拿不到C，且safemode当前disabled，不影响交易决策）
     today = datetime.now().strftime('%Y%m%d')
     log_path = os.path.join(SAFEMODE_LOG_DIR, 'trades_blocked_%s.csv' % today)
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -290,6 +292,7 @@ def _safemode_log_signal(stock_code, score_8d, buy_points, sector_heat, details=
     if not SAFEMODE_ENABLED:
         return
     os.makedirs(SAFEMODE_LOG_DIR, exist_ok=True)
+    # NOTE: safemode日志时间用设备时间（拿不到C，且safemode当前disabled，不影响交易决策）
     today = datetime.now().strftime('%Y%m%d')
     log_path = os.path.join(SAFEMODE_LOG_DIR, 'signals_%s.csv' % today)
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -584,6 +587,36 @@ def _get_qmt_time(C):
     except Exception:
         tick_ms = C.get_tick_timetag()
         return datetime.fromtimestamp(tick_ms / 1000)
+
+
+def _market_now(C):
+    """策略权威时间：优先 QMT 行情时间，盘前无行情时用最新K线日期兜底。
+
+    设备时钟不可信（CMOS电池没电会错乱），策略绝对时间一律走此函数，
+    不用 datetime.now()。相对计时（time.time()差值）不受影响，仍用设备时钟。
+    """
+    # 1. 优先 QMT 行情时间
+    try:
+        dt = _get_qmt_time(C)
+        if dt is not None:
+            if dt.year >= 2020:
+                return dt
+    except Exception:
+        pass
+    # 2. 兜底：最新K线日期（盘前9:25前无行情时）
+    try:
+        if _g_all_data:
+            for code, df in _g_all_data.items():
+                if df is not None and len(df) > 0:
+                    last_idx = df.index[-1]
+                    if hasattr(last_idx, 'to_pydatetime'):
+                        return last_idx.to_pydatetime()
+                    return datetime.strptime(str(last_idx)[:10], '%Y-%m-%d')
+    except Exception:
+        pass
+    # 3. 最后兜底：设备时间（仅当行情和K线都拿不到，记录警告）
+    print("  [时间警告] 行情时间与K线均不可用，回退设备时间")
+    return datetime.now()
 
 
 def _get_stock_name_safe(C, code):
@@ -1860,7 +1893,7 @@ def _write_daily_log(today, C):
     lines.append(' 总盈亏    ' + '{:+,}'.format(int(total_pnl)))
     lines.append('')
 
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+    now_str = _market_now(C).strftime('%Y-%m-%d %H:%M')
     lines.append(' 日志生成: ' + now_str)
     lines.append(bot)
 
@@ -1970,7 +2003,7 @@ def _log_premarket_diagnostic(C, today, now):
             try:
                 if write_header:
                     f.write('timestamp,today,now,code,md_close_minus_1,md_close_minus_2,tick_lastPrice,tick_preClose,tick_open,tick_high,tick_low\n')
-                ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                ts = _market_now(C).strftime('%Y-%m-%d %H:%M:%S')
                 for code in codes:
                     md_c1 = ''
                     md_c2 = ''
@@ -2297,6 +2330,10 @@ def _check_pending_sells(C, today):
                 print("  [卖出清理] %s 订单号无效(%s)，清理" % (code, info.get('order_id')))
                 _g_pending_sells.pop(code, None)
                 _g_my_codes.pop(code, None)
+                try:
+                    write_holdings_file(INTRADAY_HOLD_FILE, _g_my_codes)
+                except Exception as e:
+                    print("  [持仓清理] 写 holdings 文件失败: %s" % e)
                 continue
             # 反查失败兜底：先查实际持仓再判成败，避免误撤活着的限价卖单
             pos = _g_trader.get_position(code)
@@ -2374,7 +2411,7 @@ def _check_pending_sells(C, today):
             if _is_limit_down(code, C):
                 _g_pending_limitdown_sells[code] = dict(
                     info,
-                    timestamp=datetime.now().strftime('%Y%m%d'),
+                    timestamp=_market_now(C).strftime('%Y%m%d'),
                 )
                 _g_pending_sells.pop(code, None)
                 print("  [跌停暂缓] %s 跌停中，移入等待队列" % code)
@@ -2471,9 +2508,25 @@ def _finish_pending_sell(C, code, info, vol_traded):
     _append_log('卖出成交: %s %d股 @ %.2f' % (code, vol_traded, sell_price))
     _g_trade_records.append({'type':'卖出','code':code,'direction':'卖','volume':vol_traded,'price':sell_price,'amount':sell_price*vol_traded,'status':'成交'})
     _g_pending_sells.pop(code, None)
+    # 成交确认即移除：以策略侧成交判定为准，不等 QMT position 缓存刷新
+    # （QMT 缓存刷新有延迟，当天 m_nVolume 还显示旧值会导致清仓票赖着占名额）
     pos = _g_trader.get_position(code) if _g_trader else None
-    if pos is None or pos.get('volume', 0) <= 0:
-        _g_my_codes.pop(code, None)
+    qmt_vol = pos.get('volume', 0) if pos else 0
+    if qmt_vol > 0:
+        # QMT 缓存未刷新但仍判定成交：以策略侧为准 pop，打 warning 留痕便于事后核
+        print("  [持仓清理] %s 成交确认但 QMT 缓存仍显示 %d 股，按策略侧成交移除" % (code, qmt_vol))
+    _g_my_codes.pop(code, None)
+    # 立即写 holdings 文件，释放名额（原 bug：此处未写文件）
+    try:
+        write_holdings_file(INTRADAY_HOLD_FILE, _g_my_codes)
+    except Exception as e:
+        print("  [持仓清理] 写 holdings 文件失败: %s" % e)
+    # 同步卖出引擎状态
+    if _g_sell_engine is not None:
+        try:
+            _g_sell_engine.save_state()
+        except Exception:
+            pass
 
 
 def _retry_pending_sell(code, info, C):
@@ -2496,6 +2549,10 @@ def _retry_pending_sell(code, info, C):
         print("    -> %s 已无可卖持仓，清理记录" % code)
         _g_pending_sells.pop(code, None)
         _g_my_codes.pop(code, None)
+        try:
+            write_holdings_file(INTRADAY_HOLD_FILE, _g_my_codes)
+        except Exception as e:
+            print("  [持仓清理] 写 holdings 文件失败: %s" % e)
         return
 
     use_market = info.get('retries', 0) >= 1  # 首次重试就用市价确保成交
@@ -3295,7 +3352,7 @@ def _execute_swap(old_code, new_candidate, sell_decision, C):
             'retries': 0,
             'is_clear': True,
             'code': old_code,
-            'today': datetime.now().strftime('%Y%m%d'),
+            'today': _market_now(C).strftime('%Y%m%d'),
         }
         _g_candidate_queue.insert(0, new_candidate)
         print("  [换仓] 卖出 %s %d股 @ %.2f, 待成交后买入 %s" % (old_code, vol, price, new_candidate['code']))
@@ -3369,6 +3426,7 @@ class StrategyRunner(object):
         if SAFEMODE_ENABLED:
             os.makedirs(SAFEMODE_LOG_DIR, exist_ok=True)
             with open(os.path.join(SAFEMODE_LOG_DIR, "safemode_started.log"), "a") as f:
+                # NOTE: safemode日志时间用设备时间（拿不到C，且safemode当前disabled，不影响交易决策）
                 f.write("[%s] SAFEMODE ACTIVE - 真仓锁定\n" % datetime.now())
 
         _g_trader = Trader(C, ACCOUNT_ID, 'STOCK', STRATEGY_NAME)
@@ -3393,6 +3451,11 @@ class StrategyRunner(object):
         _g_sell_engine.load_state()
 
         _g_strategy_start_ts = time.time()
+        try:
+            _mkt = _market_now(C)
+            print("  [时间校验] 行情时间=%s 设备时间=%s" % (_mkt.strftime('%Y-%m-%d %H:%M:%S'), datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        except Exception as e:
+            print("  [时间校验] 异常: %s" % e)
         _g_init_done = True
         print("[%s] 初始化完成  账号=%s" % (STRATEGY_NAME, ACCOUNT_ID))
         print("[%s] 策略本金=%d  累计盈亏=%+.0f  当前净值=%.0f" % (
