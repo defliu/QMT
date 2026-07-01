@@ -1,6 +1,7 @@
 # QMT 策略全局配置
 strategy:
   name: "DUAL_BAND"
+  display_name: "主升浪6+2"
   capital_base: 100000
   max_hold: 5
   target_ratio: 0.16

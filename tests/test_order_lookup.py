@@ -63,7 +63,7 @@ class TestLookupRemarkRelaxed:
         qmt.SAFEMODE_ENABLED = False
         try:
             ctx = FakeContext()
-            trader = qmt.Trader(ctx, '67014907', 'STOCK', '双带主升浪_尾盘_外部池_beat四层版')
+            trader = qmt.Trader(ctx, '67014907', 'STOCK', qmt.STRATEGY_NAME)
 
             now = time.time()
             order = FakeOrder('000001.SZ', 99999, 500, direction='卖出',
@@ -90,7 +90,7 @@ class TestLookupRemarkRelaxed:
         qmt.SAFEMODE_ENABLED = False
         try:
             ctx = FakeContext()
-            trader = qmt.Trader(ctx, '67014907', 'STOCK', '双带主升浪_尾盘_外部池_beat四层版')
+            trader = qmt.Trader(ctx, '67014907', 'STOCK', qmt.STRATEGY_NAME)
 
             now = time.time()
             order = FakeOrder('000001.SZ', 88888, 500, direction='卖出',
@@ -121,7 +121,7 @@ class TestLookupRemarkPriority:
         qmt.SAFEMODE_ENABLED = False
         try:
             ctx = FakeContext()
-            strategy_name = '双带主升浪_尾盘_外部池_beat四层版'
+            strategy_name = qmt.STRATEGY_NAME
             trader = qmt.Trader(ctx, '67014907', 'STOCK', strategy_name)
 
             now = time.time()
@@ -152,7 +152,7 @@ class TestLookupRemarkPriority:
         qmt.SAFEMODE_ENABLED = False
         try:
             ctx = FakeContext()
-            trader = qmt.Trader(ctx, '67014907', 'STOCK', '双带主升浪_尾盘_外部池_beat四层版')
+            trader = qmt.Trader(ctx, '67014907', 'STOCK', qmt.STRATEGY_NAME)
 
             now = time.time()
             order = FakeOrder('000001.SZ', 33333, 500, direction='卖出',
@@ -183,10 +183,10 @@ class TestBuyOrderLookup:
         qmt.SAFEMODE_ENABLED = False
         try:
             ctx = FakeContext()
-            trader = qmt.Trader(ctx, '67014907', 'STOCK', '双带主升浪_尾盘_外部池_beat四层版')
+            trader = qmt.Trader(ctx, '67014907', 'STOCK', qmt.STRATEGY_NAME)
 
             order = FakeOrder('600110.SH', 55555, 300, direction='买入',
-                              remark='双带主升浪_尾盘_外部池_beat四层版', insert_time='14:30:00')
+                              remark=qmt.STRATEGY_NAME, insert_time='14:30:00')
 
             old_func = getattr(qmt, 'get_trade_detail_data', None)
             qmt.get_trade_detail_data = lambda *a, **kw: [order]
@@ -209,7 +209,7 @@ class TestBuyOrderLookup:
         qmt.SAFEMODE_ENABLED = False
         try:
             ctx = FakeContext()
-            trader = qmt.Trader(ctx, '67014907', 'STOCK', '双带主升浪_尾盘_外部池_beat四层版')
+            trader = qmt.Trader(ctx, '67014907', 'STOCK', qmt.STRATEGY_NAME)
 
             old_func = getattr(qmt, 'get_trade_detail_data', None)
             qmt.get_trade_detail_data = lambda *a, **kw: []

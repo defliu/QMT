@@ -31,7 +31,24 @@ from core.risk_manager import Action, SellDecision, SellPositionState, SellStrat
 
 
 _DEFAULT_CONFIG = {
-    'paths': {},
+    'strategy': {
+        'name': 'DUAL_BAND',
+        'display_name': '主升浪6+2',
+        'capital_base': 100000,
+    },
+    'paths': {
+        'pool_file': 'D:/QMT_POOL/QMTselected.txt',
+        'intraday_hold_file': 'D:/QMT_POOL/endofday_holdings_beat.txt',
+        'endofday_hold_file': 'D:/QMT_POOL/intraday_holdings.txt',
+        'intraday_nav_file': 'D:/QMT_POOL/endofday_nav_beat.txt',
+        'endofday_nav_file': 'D:/QMT_POOL/endofday_nav.txt',
+        'sector_heat_file': 'D:/QMT_POOL/sector_heat.json',
+        'pool_path': 'D:/QMT_POOL/selected.txt',
+        'trade_log_file': 'D:/QMT_POOL/成交记录_尾盘_外部池_beat.txt',
+        'score_history_file': 'D:/QMT_POOL/endofday_score_history_beat.json',
+        'intraday_sell_state_file': 'D:/QMT_POOL/endofday_sell_state_beat.json',
+        'cumulative_pnl_file': 'D:/QMT_POOL/cumulative_pnl_DUAL_BAND.txt',
+    },
     'safemode': {
         'enabled': False,
         'log_dir': 'D:/QMT_POOL/safemode_logs/',
@@ -39,7 +56,6 @@ _DEFAULT_CONFIG = {
         'block_file_write': False,
     },
     'debug_mode': {'enabled': False},
-    'strategy': {'capital_base': 100000},
 }
 
 
@@ -84,34 +100,35 @@ def _lightweight_yaml_parse(text):
 
 
 def _load_config():
-    """从 config/global_config.yaml 加载路径和 safemode 配置。
-
-    PyYAML 可用时使用 yaml.safe_load；不可用时使用内置轻量解析器。
-    配置文件缺失/读取失败/解析失败时，返回内置默认配置。
+    """加载 config。策略自包含：读不到 config 文件时用内置默认配置。
+    候选路径按优先级尝试，都不存在则用 _DEFAULT_CONFIG（拿任何设备都能跑）。
     """
-    try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(os.path.dirname(script_dir), 'config', 'global_config.yaml')
-    except NameError:
-        config_path = 'D:/QMT_STRATEGIES/config/global_config.yaml'
-
+    candidates = [
+        'D:/QMT_STRATEGIES/config/global_config.yaml',
+        'config/global_config.yaml',
+    ]
+    config_path = None
+    for cp in candidates:
+        try:
+            if os.path.exists(cp):
+                config_path = cp
+                break
+        except Exception:
+            continue
+    if config_path is None:
+        return dict(_DEFAULT_CONFIG)
     try:
         with open(config_path, encoding='utf-8') as f:
             text = f.read()
-    except Exception as e:
-        print('[配置] 读取配置失败，使用内置默认配置: %s' % e)
+    except Exception:
         return dict(_DEFAULT_CONFIG)
-
     try:
         import yaml
         cfg = yaml.safe_load(text) or {}
     except ImportError:
-        print('[配置] PyYAML 不可用，使用内置默认配置')
         cfg = _lightweight_yaml_parse(text)
-    except Exception as e:
-        print('[配置] YAML 解析失败，使用内置默认配置: %s' % e)
+    except Exception:
         cfg = _lightweight_yaml_parse(text)
-
     if not cfg:
         cfg = dict(_DEFAULT_CONFIG)
     return cfg
@@ -136,7 +153,8 @@ _strategy_config = _full_config.get('strategy', {})
 # ============================================================
 
 ACCOUNT_ID = '67014907'
-STRATEGY_NAME = '双带主升浪_尾盘_外部池_beat四层版'
+STRATEGY_KEY = _strategy_config.get('name', 'DUAL_BAND')
+STRATEGY_NAME = _strategy_config.get('display_name', STRATEGY_KEY)
 STRATEGY_VERSION = 'v2026.06.30-f1f5-lookup'
 
 STRATEGY_CAPITAL = float(_strategy_config.get('capital_base', 100000))
@@ -161,6 +179,7 @@ POOL_PATH = _path_config.get('pool_path', 'D:/QMT_POOL/selected.txt')
 TRADE_LOG_FILE = _path_config.get('trade_log_file', 'D:/QMT_POOL/成交记录_尾盘_外部池_beat.txt')
 SCORE_HISTORY_FILE = _path_config.get('score_history_file', 'D:/QMT_POOL/endofday_score_history_beat.json')
 INTRADAY_SELL_STATE_FILE = _path_config.get('intraday_sell_state_file', 'D:/QMT_POOL/endofday_sell_state_beat.json')
+CUMULATIVE_PNL_FILE = _path_config.get('cumulative_pnl_file', 'D:/QMT_POOL/cumulative_pnl_%s.txt' % STRATEGY_KEY)
 
 TEST_MODE = False
 QUIET_MODE = False
@@ -172,6 +191,7 @@ if DEBUG_MODE:
     INTRADAY_HOLD_FILE = 'D:/QMT_POOL/allday_holdings.txt'
     ENDOFDAY_HOLD_FILE = 'D:/QMT_POOL/allday_endofday.txt'
     INTRADAY_NAV_FILE = 'D:/QMT_POOL/allday_nav.txt'
+    CUMULATIVE_PNL_FILE = 'D:/QMT_POOL/allday_nav.txt'
     TRADE_LOG_FILE = 'D:/QMT_POOL/成交记录_全天版.txt'
     # POOL_FILE/POOL_PATH 共享外部池，保持一致
     POOL_FILE = _path_config.get('pool_file', 'D:/QMT_POOL/QMTselected.txt')
@@ -210,6 +230,7 @@ _g_my_codes = {}
 _g_cumulative_pnl = 0.0
 _g_last_date = ''
 _g_today_done = False
+_g_exported_today = False
 _g_data_loaded = False
 _g_wait_printed = False
 _g_pending_buys = {}
@@ -790,6 +811,261 @@ def write_nav_file(filepath, cumulative_pnl):
             f.write("%.2f\n" % cumulative_pnl)
     except Exception as e:
         print("  [净值文件] 写入失败 %s: %s" % (filepath, e))
+
+
+def rebuild_cumulative_pnl_from_csv():
+    """从 D:/qmt_pool/持仓明细_*.csv 重建累计已实现盈亏。
+
+    扫所有历史持仓明细 CSV（日期<今日），按证券代码去重，
+    取每只股票最新一次"拥股=0"（已清仓）的持仓盈亏，累加返回。
+    清仓股隔日会从持仓明细消失，但历史 CSV 文件留存，所以不丢。
+    """
+    import glob
+    csv_dir = 'D:/qmt_pool'
+    today_str = datetime.now().strftime('%Y%m%d')
+    files = []
+    for fp in glob.glob(os.path.join(csv_dir, '持仓明细_*.csv')):
+        fname = os.path.basename(fp)
+        parts = fname.replace('.csv', '').split('_')
+        if len(parts) >= 2:
+            date_str = parts[-1]
+            if len(date_str) == 8 and date_str.isdigit() and date_str < today_str:
+                files.append((date_str, fp))
+    if not files:
+        return None
+    files.sort()
+    closed_pnl = {}
+    for date_str, fp in files:
+        try:
+            with open(fp, 'r', encoding='gbk') as f:
+                lines = f.readlines()
+        except Exception as e:
+            print("  [重建] 读取失败 %s: %s" % (fp, e))
+            continue
+        if len(lines) < 2:
+            continue
+        header = lines[0].strip().split(',')
+        try:
+            idx_code = header.index('证券代码')
+            idx_vol = header.index('当前拥股')
+            idx_pnl = header.index('持仓盈亏')
+        except (ValueError, IndexError):
+            print("  [重建] 表头未找到目标列: %s" % fp)
+            continue
+        for line in lines[1:]:
+            row = line.strip().split(',')
+            if len(row) <= max(idx_code, idx_vol, idx_pnl):
+                continue
+            code = row[idx_code].strip()
+            vol_str = row[idx_vol].strip()
+            pnl_str = row[idx_pnl].strip()
+            if not code or not vol_str:
+                continue
+            try:
+                volume = int(float(vol_str))
+                pos_pnl = float(pnl_str) if pnl_str else 0.0
+            except ValueError:
+                continue
+            if volume == 0:
+                closed_pnl[code] = pos_pnl
+    total = sum(closed_pnl.values())
+    print("  [重建] 扫描 %d 个持仓明细CSV，清仓股 %d 只，累计已实现盈亏=%+.2f" % (
+        len(files), len(closed_pnl), total))
+    return total
+
+
+# ============================================================
+#  每日数据导出（成交/持仓/资金 CSV）
+# ============================================================
+
+EXPORT_OUTPUT_DIR = r'D:\qmt_pool'
+
+
+def _is_export_time():
+    """工作日 15:05 后才允许导出。周末/盘前返回 False。"""
+    now = datetime.now()
+    if now.weekday() >= 5:
+        return False
+    hm = now.strftime('%H%M')
+    if hm < '1505':
+        return False
+    return True
+
+
+def _export_safe_attr(obj, attr, default=''):
+    if attr is None or attr == '':
+        return default
+    try:
+        val = getattr(obj, attr, None)
+        if val is None:
+            return default
+        return str(val)
+    except Exception:
+        return default
+
+
+def _export_fmt_amount(obj, attr):
+    try:
+        val = getattr(obj, attr, None)
+        if val is None:
+            return ''
+        return '%.2f' % float(val)
+    except Exception:
+        return ''
+
+
+def _export_fmt_int(obj, attr):
+    try:
+        val = getattr(obj, attr, None)
+        if val is None:
+            return ''
+        return str(int(val))
+    except Exception:
+        return ''
+
+
+def _export_fmt_pct(obj, attr, multiply=True):
+    try:
+        val = getattr(obj, attr, None)
+        if val is None:
+            return ''
+        v = float(val)
+        if multiply:
+            v = v * 100.0
+        return '%.2f' % v
+    except Exception:
+        return ''
+
+
+def export_deals(ContextInfo):
+    deals = get_trade_detail_data(ACCOUNT_ID, 'STOCK', 'deal')
+    date_str = datetime.now().strftime('%Y%m%d')
+    filepath = os.path.join(EXPORT_OUTPUT_DIR, '成交明细_%s.csv' % date_str)
+    header = '资金账号,成交日期,成交时间,交易所,证券代码,证券名称,买卖标记,成交数量,成交价格,成交金额,手续费,成交编号,合同编号,订单编号,任务编号,投资备注,账号备注,分支机构,投资备注1,股东号'
+    with open(filepath, 'w', encoding='gbk') as f:
+        f.write(header + '\n')
+        for deal in deals:
+            row = ','.join([
+                _export_safe_attr(deal, 'm_strAccountID'),
+                _export_safe_attr(deal, 'm_strTradeDate'),
+                _export_safe_attr(deal, 'm_strTradeTime'),
+                _export_safe_attr(deal, 'm_strExchangeID'),
+                _export_safe_attr(deal, 'm_strInstrumentID'),
+                _export_safe_attr(deal, 'm_strInstrumentName'),
+                _export_safe_attr(deal, 'm_strOptName'),
+                _export_fmt_int(deal, 'm_nVolume'),
+                _export_fmt_amount(deal, 'm_dPrice'),
+                _export_fmt_amount(deal, 'm_dTradeAmount'),
+                _export_fmt_amount(deal, 'm_dCommission'),
+                _export_safe_attr(deal, 'm_strTradeID'),
+                _export_safe_attr(deal, 'm_strOrderSysID'),
+                _export_safe_attr(deal, 'm_strOrderRef'),
+                _export_safe_attr(deal, 'm_strCompactNo'),
+                '',
+                _export_safe_attr(deal, 'm_strAccountRemark'),
+                '',
+                '',
+                '',
+            ])
+            f.write(row + '\n')
+    print('[导出] 成交明细 %d 条 -> %s' % (len(deals), filepath))
+    return filepath
+
+
+def export_positions(ContextInfo):
+    positions = get_trade_detail_data(ACCOUNT_ID, 'STOCK', 'position')
+    date_str = datetime.now().strftime('%Y%m%d')
+    filepath = os.path.join(EXPORT_OUTPUT_DIR, '持仓明细_%s.csv' % date_str)
+    header = '资金账号,交易所,证券代码,证券名称,当前拥股,可用数量,冻结数量,成本价,最新价,持仓盈亏,浮动盈亏,盈亏比例,当日涨幅,市值,持仓成本,股东账号,市场名称,资产占比,市值占比,状态,分支机构,非流通股,当日盈亏'
+    with open(filepath, 'w', encoding='gbk') as f:
+        f.write(header + '\n')
+        for pos in positions:
+            row = ','.join([
+                _export_safe_attr(pos, 'm_strAccountID'),
+                _export_safe_attr(pos, 'm_strExchangeID'),
+                _export_safe_attr(pos, 'm_strInstrumentID'),
+                _export_safe_attr(pos, 'm_strInstrumentName'),
+                _export_fmt_int(pos, 'm_nVolume'),
+                _export_fmt_int(pos, 'm_nCanUseVolume'),
+                _export_fmt_int(pos, 'm_nFrozenVolume'),
+                _export_fmt_amount(pos, 'm_dOpenPrice'),
+                _export_fmt_amount(pos, 'm_dLastPrice'),
+                _export_fmt_amount(pos, 'm_dPositionProfit'),
+                _export_fmt_amount(pos, 'm_dFloatProfit'),
+                _export_fmt_pct(pos, 'm_dProfitRate', multiply=True),
+                '',
+                _export_fmt_amount(pos, 'm_dMarketValue'),
+                _export_fmt_amount(pos, 'm_dPositionCost'),
+                _export_safe_attr(pos, 'm_strStockHolder'),
+                _export_safe_attr(pos, 'm_strExchangeName'),
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+            ])
+            f.write(row + '\n')
+    print('[导出] 持仓明细 %d 条 -> %s' % (len(positions), filepath))
+    return filepath
+
+
+def export_account(ContextInfo):
+    accounts = get_trade_detail_data(ACCOUNT_ID, 'STOCK', 'account')
+    date_str = datetime.now().strftime('%Y%m%d')
+    filepath = os.path.join(EXPORT_OUTPUT_DIR, '资金概况_%s.csv' % date_str)
+    header = '资金账号,账号名称,账号备注,登录状态,操作,总资产,净资产,总负债,总市值,可用金额,冻结金额,持仓盈亏,手续费,可取金额,股票总市值,基金总市值,债券总市值,回购总市值,报撤单比,分支机构,资金余额,今日账号盈亏'
+    with open(filepath, 'w', encoding='gbk') as f:
+        f.write(header + '\n')
+        for acc in accounts:
+            row = ','.join([
+                _export_safe_attr(acc, 'm_strAccountID'),
+                '',
+                _export_safe_attr(acc, 'm_strAccountRemark'),
+                _export_safe_attr(acc, 'm_strStatus'),
+                '',
+                _export_fmt_amount(acc, 'm_dAssetBalance'),
+                '',
+                _export_fmt_amount(acc, 'm_dTotalDebit'),
+                _export_fmt_amount(acc, 'm_dStockValue'),
+                _export_fmt_amount(acc, 'm_dAvailable'),
+                _export_fmt_amount(acc, 'm_dFrozenCash'),
+                _export_fmt_amount(acc, 'm_dPositionProfit'),
+                _export_fmt_amount(acc, 'm_dCommission'),
+                _export_fmt_amount(acc, 'm_dFetchBalance'),
+                _export_fmt_amount(acc, 'm_dStockValue'),
+                _export_fmt_amount(acc, 'm_dFundValue'),
+                '',
+                _export_fmt_amount(acc, 'm_dRepurchaseValue'),
+                '',
+                _export_safe_attr(acc, 'm_strBrokerName'),
+                _export_fmt_amount(acc, 'm_dBalance'),
+                '',
+            ])
+            f.write(row + '\n')
+    print('[导出] 资金概况 %d 条 -> %s' % (len(accounts), filepath))
+    return filepath
+
+
+def export_daily_data(ContextInfo):
+    """主入口：导出所有数据。带时间锁，非工作日15:05后跳过。"""
+    if not _is_export_time():
+        print('[导出] 非工作日15:05后，跳过 (now=%s)' % datetime.now().strftime('%Y-%m-%d %H:%M'))
+        return []
+    files = []
+    try:
+        files.append(export_deals(ContextInfo))
+    except Exception as e:
+        print('[导出] 成交明细失败: %s' % e)
+    try:
+        files.append(export_positions(ContextInfo))
+    except Exception as e:
+        print('[导出] 持仓明细失败: %s' % e)
+    try:
+        files.append(export_account(ContextInfo))
+    except Exception as e:
+        print('[导出] 资金概况失败: %s' % e)
+    return files
 
 
 def calc_floating_pnl(account_id, account_type='STOCK'):
@@ -2381,7 +2657,7 @@ def _check_pending_sells(C, today):
                     if cost_price > 0 and sell_price > 0:
                         realized = (sell_price - cost_price) * traded
                         _g_cumulative_pnl += realized
-                        write_nav_file(INTRADAY_NAV_FILE, _g_cumulative_pnl)
+                        write_nav_file(CUMULATIVE_PNL_FILE, _g_cumulative_pnl)
                     _append_trade_record(C, '卖出', code, sell_price, traded,
                                          profit_pct=info.get('pct', 0),
                                          profit_amount=realized)
@@ -2421,7 +2697,7 @@ def _check_pending_sells(C, today):
             if cost_price > 0 and sell_price > 0:
                 realized = (sell_price - cost_price) * vol_traded
                 _g_cumulative_pnl += realized
-                write_nav_file(INTRADAY_NAV_FILE, _g_cumulative_pnl)
+                write_nav_file(CUMULATIVE_PNL_FILE, _g_cumulative_pnl)
                 print("    已实现盈亏: %+.0f  累计: %+.0f" % (realized, _g_cumulative_pnl))
             _append_trade_record(C, '卖出', code, sell_price, vol_traded,
                                  profit_pct=info.get('pct', 0),
@@ -2525,7 +2801,7 @@ def _finish_pending_sell(C, code, info, vol_traded):
     if cost_price > 0 and vol_traded > 0 and sell_price > 0:
         realized = (sell_price - cost_price) * vol_traded
         _g_cumulative_pnl += realized
-        write_nav_file(INTRADAY_NAV_FILE, _g_cumulative_pnl)
+        write_nav_file(CUMULATIVE_PNL_FILE, _g_cumulative_pnl)
     print("    已实现盈亏: %+.0f  累计: %+.0f" % (realized, _g_cumulative_pnl))
 
     _append_trade_record(C, '卖出', code, sell_price, vol_traded,
@@ -3515,6 +3791,7 @@ class StrategyRunner(object):
         global _g_pending_buys, _g_retry_queue, _g_candidate_queue, _g_per_stock_amount
         global _g_pending_sells, _g_pending_limitdown_sells, _g_sell_engine
         global _g_strategy_start_ts
+        global _g_exported_today
 
         if _g_init_done:
             return
@@ -3529,7 +3806,16 @@ class StrategyRunner(object):
         _g_trader = Trader(C, ACCOUNT_ID, 'STOCK', STRATEGY_NAME)
         _g_scorer = SwitchScorer(mode='6plus2')
 
-        _g_cumulative_pnl = read_nav_file(INTRADAY_NAV_FILE)
+        rebuilt = rebuild_cumulative_pnl_from_csv()
+        if rebuilt is not None:
+            _g_cumulative_pnl = rebuilt
+            write_nav_file(CUMULATIVE_PNL_FILE, _g_cumulative_pnl)
+            print("  [重建] 从持仓明细CSV重建累计盈亏=%+.0f" % _g_cumulative_pnl)
+        else:
+            _g_cumulative_pnl = read_nav_file(CUMULATIVE_PNL_FILE)
+            if not os.path.exists('D:/QMT_POOL/cumulative_pnl_%s.txt' % STRATEGY_KEY) and os.path.exists(INTRADAY_NAV_FILE):
+                _g_cumulative_pnl = read_nav_file(INTRADAY_NAV_FILE)
+                print("  [迁移] 新累计文件不存在，从旧 %s 读取=%+.0f" % (os.path.basename(INTRADAY_NAV_FILE), _g_cumulative_pnl))
         current_nav = STRATEGY_CAPITAL + _g_cumulative_pnl
 
         _g_pending_buys = {}
@@ -3563,6 +3849,17 @@ class StrategyRunner(object):
             "买入窗口=调试模式-全天候" if DEBUG_MODE else "买入窗口=%s（数据含当天日线）" % BUY_WINDOW_LABEL))
         print("[%s] K线周期请设为「1分钟」" % STRATEGY_NAME)
 
+        # 盘后部署立即导出当日数据（Hermes 每日数据，防忘）
+        # 带 _is_export_time 时间锁：盘中启动跳过，盘后(>=15:05工作日)立即导
+        if not _g_exported_today:
+            try:
+                files = export_daily_data(C)
+                if files:
+                    _g_exported_today = True
+                    print("  [导出] init 盘后部署导出完成: %d 个文件" % len(files))
+            except Exception as e:
+                print("  [导出] init 自动导出失败: %s" % e)
+
     def handlebar(self, C):
         try:
             self._handlebar_impl(C)
@@ -3584,6 +3881,7 @@ class StrategyRunner(object):
         if today != _g_last_date:
             _g_last_date = today
             _g_today_done = False
+            _g_exported_today = False
             _g_data_loaded = False
             _g_wait_printed = False
             _g_sell_skip_printed.clear()
@@ -3596,7 +3894,7 @@ class StrategyRunner(object):
             _g_premarket_check_done = False
             _g_premarket_orders = {}
             _g_my_codes = read_holdings_file(INTRADAY_HOLD_FILE)
-            _g_cumulative_pnl = read_nav_file(INTRADAY_NAV_FILE)
+            _g_cumulative_pnl = read_nav_file(CUMULATIVE_PNL_FILE)
             _g_pending_buys = {}
             _g_retry_queue = []
             _g_candidate_queue = []
@@ -3691,6 +3989,13 @@ class StrategyRunner(object):
                 _print_holdings_report(C, today)
                 _g_today_done = True
             _write_daily_log(today, C)
+            # 15:05 后自动导出当日 CSV（Hermes 每日数据，防忘）
+            if now >= '1505' and not _g_exported_today:
+                try:
+                    export_daily_data(C)
+                    _g_exported_today = True
+                except Exception as e:
+                    print('  [导出] 自动导出失败: %s' % e)
 
         if _g_today_done:
             return
@@ -3776,12 +4081,12 @@ class StrategyRunner(object):
             print("  最终持仓: %s" % sorted(_g_my_codes))
             return
 
-        _g_cumulative_pnl = read_nav_file(INTRADAY_NAV_FILE)
+        _g_cumulative_pnl = read_nav_file(CUMULATIVE_PNL_FILE)
         current_nav = STRATEGY_CAPITAL + _g_cumulative_pnl
         print("\n[%s] 策略退出" % STRATEGY_NAME)
         print("  最终持仓: %s" % sorted(_g_my_codes))
         print("  累计已实现盈亏: %+.0f  策略净值: %.0f" % (_g_cumulative_pnl, current_nav))
         write_holdings_file(INTRADAY_HOLD_FILE, _g_my_codes)
-        write_nav_file(INTRADAY_NAV_FILE, _g_cumulative_pnl)
+        write_nav_file(CUMULATIVE_PNL_FILE, _g_cumulative_pnl)
         if _g_sell_engine:
             _g_sell_engine.save_state()

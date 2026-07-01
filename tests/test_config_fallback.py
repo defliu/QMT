@@ -76,42 +76,108 @@ class TestLoadConfigFallback(unittest.TestCase):
     def test_missing_config_file_returns_default(self):
         """配置文件不存在时返回默认配置"""
         import adapters.qmt_wrapper as mod
-        original = mod.__file__
-        with tempfile.TemporaryDirectory() as tmp:
-            fake = os.path.join(tmp, 'fake_wrapper.py')
-            with open(fake, 'w') as f:
-                f.write('# fake')
-            old_file = mod.__file__
-            try:
-                mod.__file__ = fake
-                cfg = mod._load_config()
-                self.assertIn('safemode', cfg)
-                self.assertEqual(cfg['strategy']['capital_base'], 100000)
-            finally:
-                mod.__file__ = old_file
+        import builtins as _builtins
+        real_exists = os.path.exists
+        real_open = _builtins.open
+        os.path.exists = lambda p: False
+        try:
+            cfg = mod._load_config()
+            self.assertIn('safemode', cfg)
+            self.assertIn('strategy', cfg)
+            self.assertEqual(cfg['strategy']['capital_base'], 100000)
+        finally:
+            os.path.exists = real_exists
 
     def test_corrupt_yaml_file_returns_default(self):
-        """损坏的 YAML 文件返回默认配置"""
+        """配置文件存在时加载该配置"""
         import adapters.qmt_wrapper as mod
+        import builtins as _builtins
         with tempfile.TemporaryDirectory() as tmp:
-            fake = os.path.join(tmp, 'fake_wrapper.py')
-            fake_dir = os.path.join(tmp, 'adapters')
-            os.makedirs(fake_dir)
-            with open(os.path.join(fake_dir, 'fake_wrapper.py'), 'w') as f:
-                f.write('# fake')
             config_dir = os.path.join(tmp, 'config')
             os.makedirs(config_dir)
-            with open(os.path.join(config_dir, 'global_config.yaml'), 'w', encoding='utf-8') as f:
+            fake_config = os.path.join(config_dir, 'global_config.yaml')
+            with open(fake_config, 'w', encoding='utf-8') as f:
                 f.write('safemode:\n  enabled: true\n  log_dir: /tmp/logs\n')
-            old_file = mod.__file__
+            _real_exists = os.path.exists
+            _real_open = _builtins.open
+            def _patched_exists(p):
+                if p == 'D:/QMT_STRATEGIES/config/global_config.yaml':
+                    return True
+                return _real_exists(p)
+            def _patched_open(p, *a, **kw):
+                if p == 'D:/QMT_STRATEGIES/config/global_config.yaml':
+                    return _real_open(fake_config, *a, **kw)
+                return _real_open(p, *a, **kw)
+            os.path.exists = _patched_exists
+            _builtins.open = _patched_open
             try:
-                mod.__file__ = os.path.join(fake_dir, 'fake_wrapper.py')
                 cfg = mod._load_config()
                 self.assertIn('safemode', cfg)
                 self.assertTrue(cfg['safemode']['enabled'])
                 self.assertEqual(cfg['safemode']['log_dir'], '/tmp/logs')
             finally:
-                mod.__file__ = old_file
+                os.path.exists = _real_exists
+                _builtins.open = _real_open
+
+
+class TestSelfContainedConfig(unittest.TestCase):
+    def test_no_config_uses_default(self):
+        """无任何 config 文件时，使用 _DEFAULT_CONFIG 内置值"""
+        import importlib
+        real_exists = os.path.exists
+        os.path.exists = lambda p: False
+        try:
+            import adapters.qmt_wrapper as mod
+            old_config = mod._full_config
+            try:
+                mod._full_config = mod._load_config()
+                mod._path_config = mod._full_config.get('paths', {})
+                mod._strategy_config = mod._full_config.get('strategy', {})
+                self.assertEqual(mod._strategy_config.get('display_name', ''), '主升浪6+2')
+                self.assertEqual(mod._strategy_config.get('name', ''), 'DUAL_BAND')
+                self.assertEqual(mod._strategy_config.get('capital_base', 0), 100000)
+            finally:
+                mod._full_config = old_config
+        finally:
+            os.path.exists = real_exists
+
+    def test_config_self_contained_paths(self):
+        """无 config 时，paths 段自包含的路径值正确"""
+        import adapters.qmt_wrapper as mod
+        real_exists = os.path.exists
+        os.path.exists = lambda p: False
+        try:
+            old_full = mod._full_config
+            try:
+                mod._full_config = mod._load_config()
+                mod._path_config = mod._full_config.get('paths', {})
+                self.assertEqual(
+                    mod._path_config.get('intraday_nav_file', ''),
+                    'D:/QMT_POOL/endofday_nav_beat.txt')
+                self.assertEqual(
+                    mod._path_config.get('cumulative_pnl_file', ''),
+                    'D:/QMT_POOL/cumulative_pnl_DUAL_BAND.txt')
+                self.assertEqual(
+                    mod._path_config.get('pool_path', ''),
+                    'D:/QMT_POOL/selected.txt')
+            finally:
+                mod._full_config = old_full
+        finally:
+            os.path.exists = real_exists
+
+    def test_load_config_no_file_attribute(self):
+        """调用 _load_config() 不应抛 NameError（不依赖 __file__）"""
+        import adapters.qmt_wrapper as mod
+        real_exists = os.path.exists
+        os.path.exists = lambda p: False
+        try:
+            cfg = mod._load_config()
+            self.assertIn('strategy', cfg)
+            self.assertEqual(cfg['strategy']['name'], 'DUAL_BAND')
+        except NameError:
+            self.fail('_load_config() raised NameError, still depends on __file__')
+        finally:
+            os.path.exists = real_exists
 
 
 if __name__ == '__main__':
