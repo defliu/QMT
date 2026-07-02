@@ -286,7 +286,20 @@ def run_backtest(
     actual_max = calendar[-1]
 
     # Pre-load full market window for the run period.
-    market_data = reader.load_window(universe, actual_min, actual_max)
+    # Warmup: 向前多加载历史，满足 prefilter min_history(250) 与 factors
+    # accel(max(periods)+20=270) 的 lookback 需求。否则短区间(如年度场景
+    # <250 交易日)会因 insufficient_history 把全票筛掉 → 零候选；长区间也会
+    # 把前 ~250 天浪费在攒历史上，交易窗口被截到末段且早期信号失真。
+    # 默认 500 自然日(≈330 交易日)覆盖 250+20+余量；可经 strategy_config
+    # _warmup_calendar_days 覆盖。回测循环 calendar 仍为 [start_date, end_date]，
+    # warmup 只用于行情加载，_slice_window_up_to 自然切到 today（含预热历史）。
+    warmup_cal_days = int((strategy_config or {}).get("_warmup_calendar_days", 500))
+    try:
+        warmup_start = (_dt.datetime.strptime(str(actual_min), "%Y-%m-%d")
+                        - _dt.timedelta(days=warmup_cal_days)).strftime("%Y-%m-%d")
+    except Exception:
+        warmup_start = actual_min
+    market_data = reader.load_window(universe, warmup_start, actual_max)
 
     # ----- Benchmark series (optional; degrade gracefully) -----
     benchmark_closes, benchmark_note = _load_benchmark_series(
