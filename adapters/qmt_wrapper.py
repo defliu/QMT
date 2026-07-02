@@ -155,7 +155,7 @@ _strategy_config = _full_config.get('strategy', {})
 ACCOUNT_ID = '67014907'
 STRATEGY_KEY = _strategy_config.get('name', 'DUAL_BAND')
 STRATEGY_NAME = _strategy_config.get('display_name', STRATEGY_KEY)
-STRATEGY_VERSION = 'v2026.07.02-orphan-adopt'
+STRATEGY_VERSION = 'v2026.07.02-orphan-adopt2'
 
 STRATEGY_CAPITAL = float(_strategy_config.get('capital_base', 100000))
 MAX_HOLD = 3
@@ -2506,6 +2506,9 @@ def _check_and_execute_sell(C, today, allowed_layers=None):
     if _g_sell_engine is None:
         return []
 
+    # 补纳管：init 首帧通道未就绪可能漏纳，每轮卖出评估前再 sync 一次
+    _sync_holdings_from_account(C, today)
+
     # 构建持仓数据供引擎使用（替代 trader.get_position 内部调用）
     positions_data = {}
     for code in _g_my_codes:
@@ -2515,6 +2518,23 @@ def _check_and_execute_sell(C, today, allowed_layers=None):
 
     rt_prices = _get_current_prices(list(_g_my_codes.keys()), C)
     raw_decisions = _g_sell_engine.evaluate(today, _g_my_codes, _g_all_data, positions_data, rt_prices)
+
+    # ===== 评估可观测性：每只持仓打一行评估摘要（防刷屏：每票每日只打一次） =====
+    if _g_my_codes:
+        triggered_codes = set(code for code, dec, shares in raw_decisions)
+        for code in sorted(_g_my_codes.keys()):
+            skey = ('eval', code)
+            if skey in _g_sell_skip_printed:
+                continue
+            _g_sell_skip_printed.add(skey)
+            pos = positions_data.get(code, {})
+            vol = pos.get('volume', 0)
+            if code in triggered_codes:
+                dec = [d for c, d, s in raw_decisions if c == code][0]
+                print("  [卖出评估] %s 持仓%d股 信号=%s 层=%s -> 触发卖出" % (
+                    code, vol, dec.reason, dec.triggered_layer))
+            else:
+                print("  [卖出评估] %s 持仓%d股 信号=无 -> 持有" % (code, vol))
 
     # ===== P2: 时段路由过滤 =====
     if allowed_layers is not None:
