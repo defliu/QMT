@@ -155,7 +155,7 @@ _strategy_config = _full_config.get('strategy', {})
 ACCOUNT_ID = '67014907'
 STRATEGY_KEY = _strategy_config.get('name', 'DUAL_BAND')
 STRATEGY_NAME = _strategy_config.get('display_name', STRATEGY_KEY)
-STRATEGY_VERSION = 'v2026.06.30-f1f5-lookup'
+STRATEGY_VERSION = 'v2026.07.02-orphan-adopt'
 
 STRATEGY_CAPITAL = float(_strategy_config.get('capital_base', 100000))
 MAX_HOLD = 3
