@@ -747,9 +747,9 @@ def get_account_holdings(account_id, account_type='STOCK'):
 def _sync_holdings_from_account(C, today):
     """用实际账户持仓强制同步 _g_my_codes 与卖出引擎 current_shares。
 
-    修 603618 类残留：卖出反查失败误判后，实盘已清仓但 _g_my_codes 残留占名额。
     - 实际 volume<=0 的 _g_my_codes 票：pop 掉，卖出引擎标 cleared
-    - 实际有 volume 但 _g_my_codes 没有的：不自动加入（避免误纳手动仓），只打印诊断
+    - 账户有 volume>0 但 _g_my_codes 没有的票（孤儿/手动仓）：纳入 _g_my_codes，
+      成本取 m_dOpenPrice，落盘 holdings 文件；卖出引擎 evaluate 自动建 state 接管
     返回同步后实际有持仓(volume>0)的 code set。
     """
     global _g_my_codes
@@ -782,6 +782,23 @@ def _sync_holdings_from_account(C, today):
                 _g_sell_engine.save_state()
             except Exception as e:
                 print("  [持仓同步] 保存卖出引擎状态失败: %s" % e)
+    adopted = []
+    try:
+        all_holdings = _g_trader.get_holdings()
+        for code, info in all_holdings.items():
+            vol = info.get('volume', 0)
+            if vol > 0 and code not in _g_my_codes:
+                cost = info.get('cost', 0)
+                _g_my_codes[code] = cost
+                adopted.append(code)
+    except Exception as e:
+        print("  [持仓纳管] 查询全量持仓失败: %s" % e)
+    if adopted:
+        print("  [持仓纳管] 发现 %d 只账户持仓未纳管，已纳入: %s" % (len(adopted), sorted(adopted)))
+        try:
+            write_holdings_file(INTRADAY_HOLD_FILE, _g_my_codes)
+        except Exception as e:
+            print("  [持仓纳管] 写持仓文件失败: %s" % e)
     held = set()
     for code in _g_my_codes.keys():
         try:
