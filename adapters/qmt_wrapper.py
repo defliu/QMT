@@ -631,8 +631,13 @@ def _get_qmt_time(C):
     try:
         return C.get_current_time()
     except Exception:
-        tick_ms = C.get_tick_timetag()
-        return datetime.fromtimestamp(tick_ms / 1000)
+        try:
+            tick_ms = C.get_tick_timetag()
+            if tick_ms is not None and tick_ms > 0:
+                return datetime.fromtimestamp(tick_ms / 1000)
+        except Exception:
+            pass
+        return datetime.now()
 
 
 def _market_now(C):
