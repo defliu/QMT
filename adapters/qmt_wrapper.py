@@ -155,7 +155,7 @@ _strategy_config = _full_config.get('strategy', {})
 ACCOUNT_ID = '67014907'
 STRATEGY_KEY = _strategy_config.get('name', 'DUAL_BAND')
 STRATEGY_NAME = _strategy_config.get('display_name', STRATEGY_KEY)
-STRATEGY_VERSION = 'v2026.07.03-export-fix-g3'
+STRATEGY_VERSION = 'v2026.07.03-observability'
 
 STRATEGY_CAPITAL = float(_strategy_config.get('capital_base', 100000))
 MAX_HOLD = 3
@@ -231,6 +231,7 @@ _g_cumulative_pnl = 0.0
 _g_last_date = ''
 _g_today_done = False
 _g_exported_today = False
+_g_phase_printed = set()
 _g_data_loaded = False
 _g_wait_printed = False
 _g_pending_buys = {}
@@ -837,6 +838,19 @@ def _sync_holdings_from_account(C, today):
     return held
 
 
+def _log_holdings_reconcile(C, tag):
+    try:
+        acct_codes = set(_g_trader.get_holdings().keys()) if _g_trader else set()
+        my_codes = set(_g_my_codes.keys())
+        only_acct = acct_codes - my_codes
+        only_my = my_codes - acct_codes
+        print("  [对账] %s _g_my_codes(%d只) vs account(%d只)" % (tag, len(my_codes), len(acct_codes)))
+        if only_acct or only_my:
+            print("  [对账告警] %s 仅账户=%s 仅策略=%s" % (tag, sorted(only_acct), sorted(only_my)))
+    except Exception as e:
+        print("  [对账] %s 失败: %s" % (tag, e))
+
+
 def read_nav_file(filepath):
     if not os.path.exists(filepath):
         return 0.0
@@ -1092,7 +1106,7 @@ def export_account(ContextInfo):
                 '',
             ])
             f.write(row + '\n')
-    print('[导出] 资金概况 %d 条 -> %s' % (len(accounts), filepath))
+        print('[导出] 资金概况 %d 条 -> %s' % (len(accounts), filepath))
     return filepath
 
 
@@ -1114,6 +1128,11 @@ def export_daily_data(ContextInfo):
         files.append(export_account(ContextInfo))
     except Exception as e:
         print('[导出] 资金概况失败: %s' % e)
+    _ok = [f for f in files if f]
+    if _ok:
+        print('[导出] 完成 产出%d文件: %s' % (len(_ok), _ok))
+    else:
+        print('[导出] 完成 但无文件产出（检查各 export_* 是否异常）')
     return files
 
 
@@ -2257,6 +2276,27 @@ def _write_daily_log(today, C):
         print('  [日志] 已写出: ' + log_path)
     except Exception as e:
         print('  [日志] 写入失败: ' + str(e))
+
+
+def _log_phase(now):
+    key, desc = None, None
+    if '0925' <= now < '0930':
+        key, desc = '0925', '集合竞价预埋窗口'
+    elif '0930' <= now < '0935':
+        key, desc = '0930', '开盘卖出评估(底线层)'
+    elif '0935' <= now < '0940':
+        key, desc = '0935', '底线+清仓层'
+    elif '0940' <= now < '1000':
+        key, desc = '0940', '全层卖出开启'
+    elif '1000' <= now < '1010':
+        key, desc = '1000', '买入窗口10:00-10:10'
+    elif '1458' <= now < '1500':
+        key, desc = '1458', '收盘序列'
+    elif '1500' <= now < '1505':
+        key, desc = '1500', '收盘帧导出'
+    if key and key not in _g_phase_printed:
+        _g_phase_printed.add(key)
+        print("  [时段] %s %s" % (key, desc))
 
 
 # ============================================================
@@ -3872,10 +3912,14 @@ class StrategyRunner(object):
                 # NOTE: safemode日志时间用设备时间（拿不到C，且safemode当前disabled，不影响交易决策）
                 f.write("[%s] SAFEMODE ACTIVE - 真仓锁定\n" % datetime.now())
 
+        _t0 = time.time()
         _g_trader = Trader(C, ACCOUNT_ID, 'STOCK', STRATEGY_NAME)
         _g_scorer = SwitchScorer(mode='6plus2')
+        print("  [init] Trader+Scorer创建 耗时%.2fs" % (time.time() - _t0))
 
+        _t0 = time.time()
         rebuilt = rebuild_cumulative_pnl_from_csv()
+        print("  [init] 累计盈亏重建 耗时%.2fs" % (time.time() - _t0))
         if rebuilt is not None:
             _g_cumulative_pnl = rebuilt
             write_nav_file(CUMULATIVE_PNL_FILE, _g_cumulative_pnl)
@@ -3893,6 +3937,7 @@ class StrategyRunner(object):
         _g_per_stock_amount = 0
         _g_pending_sells = {}
         _g_pending_limitdown_sells = {}
+        _t0 = time.time()
         _g_sell_engine = SellStrategyEngine(
             strategy_name=STRATEGY_NAME,
             account_id=ACCOUNT_ID,
@@ -3901,13 +3946,17 @@ class StrategyRunner(object):
             hard_stop_loss=HARD_STOP_LOSS,
         )
         _g_sell_engine.load_state()
+        print("  [init] 卖出引擎初始化+状态加载 耗时%.2fs" % (time.time() - _t0))
 
         _g_strategy_start_ts = time.time()
+        _t0 = time.time()
         try:
             _mkt = _market_now(C)
             print("  [时间校验] 行情时间=%s 设备时间=%s" % (_mkt.strftime('%Y-%m-%d %H:%M:%S'), datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         except Exception as e:
             print("  [时间校验] 异常: %s" % e)
+        print("  [init] 交易通道就绪 耗时%.2fs" % (time.time() - _t0))
+        _log_holdings_reconcile(C, 'init')
         _g_init_done = True
         print("[%s] 初始化完成  账号=%s" % (STRATEGY_NAME, ACCOUNT_ID))
         print("[%s] 策略版本=%s" % (STRATEGY_NAME, STRATEGY_VERSION))
@@ -3942,10 +3991,12 @@ class StrategyRunner(object):
         global _g_op_executed, _g_startup_done, _g_all_data, _g_index_data, _g_last_sell_fingerprint
         global _g_timegate_skip_printed, _g_cooling_printed, _g_exported_today
         global _g_premarket_check_done, _g_premarket_orders
+        global _g_phase_printed
 
         dt = _get_qmt_time(C)
         today = dt.strftime('%Y%m%d')
         now = dt.strftime('%H%M')
+        _log_phase(now)
 
         if today != _g_last_date:
             _g_last_date = today
@@ -3960,6 +4011,7 @@ class StrategyRunner(object):
             _g_last_sell_fingerprint = ''
             _g_timegate_skip_printed.clear()
             _g_cooling_printed = False
+            _g_phase_printed.clear()
             _g_premarket_check_done = False
             _g_premarket_orders = {}
             _g_my_codes = read_holdings_file(INTRADAY_HOLD_FILE)
@@ -4063,6 +4115,7 @@ class StrategyRunner(object):
                 try:
                     export_daily_data(C)
                     _g_exported_today = True
+                    _log_holdings_reconcile(C, 'close')
                 except Exception as e:
                     print('  [导出] 自动导出失败: %s' % e)
 
