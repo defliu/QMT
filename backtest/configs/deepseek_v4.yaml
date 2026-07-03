@@ -1,0 +1,54 @@
+# coding: utf-8
+# DeepSeek 选股策略 V4（完整版）回测配置
+# SPEC: specs/SPEC_DeepSeek选股策略回测.md
+# 数据：astock parquet（hfq 后复权，PIT 安全）
+# 大盘门 J + 基准均用 000300.SH（沪深300）；SPEC §3.1 J 写上证，此处以沪深300代理，报告注明
+
+strategy: research/deepseek
+trading_model: next_open
+
+backtest:
+  name: deepseek_v4
+  start_date: "2019-01-01"
+  end_date:   "2025-06-30"
+  initial_cash: 1000000.0
+  benchmark_code: "000300.SH"
+
+data:
+  source: astock
+  path:   "E:/astock/daily/stock_daily.parquet"
+  adjustment: hfq
+
+universe:
+  csv: "backtest/data/universe/huang_small_mid_20260403.csv"
+
+execution:
+  price: next_open
+  slippage: 0.001
+  commission_rate: 0.00015
+  tax_rate: 0.001
+
+strategy_params:
+  max_positions: 5
+  stop_loss: -0.08
+  take_profit: 0.20
+  max_hold: 60
+  market_risk_days: 3
+  _warmup_calendar_days: 500
+  # 条件阈值（默认值，显式写出便于扫描）
+  slope_thresh: 2.5
+  pullback_pct: 0.98
+  yang_ratio_thresh: 0.6
+  gain_limit: 30.0
+  eff_thresh: 0.005
+  eff_ratio_thresh: 50.0
+  turnover_low: 3.0
+  turnover_high: 10.0
+  volratio_low: 1.2
+  volratio_high: 4.0
+  mv_low: 50.0
+  mv_high: 500.0
+  bench_ma: 20
+  min_listed_days: 60
+  # V4：全部条件启用（enable 留空=默认全开）
+  enable: {}

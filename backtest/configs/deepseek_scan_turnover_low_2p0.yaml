@@ -1,0 +1,43 @@
+# coding: utf-8
+# param scan: turnover_low=2.0 (V4 base, 305 pool)
+strategy: research/deepseek
+trading_model: next_open
+backtest:
+  name: deepseek_scan_turnover_low_2p0
+  start_date: '2019-01-01'
+  end_date: '2025-06-30'
+  initial_cash: 1000000.0
+  benchmark_code: 000300.SH
+data:
+  source: astock
+  path: E:/astock/daily/stock_daily.parquet
+  adjustment: hfq
+universe:
+  csv: backtest/data/universe/p2_1b_full_a_pit_union_305.csv
+execution:
+  price: next_open
+  slippage: 0.001
+  commission_rate: 0.00015
+  tax_rate: 0.001
+strategy_params:
+  max_positions: 5
+  stop_loss: -0.08
+  take_profit: 0.2
+  max_hold: 60
+  market_risk_days: 3
+  _warmup_calendar_days: 500
+  slope_thresh: 2.5
+  pullback_pct: 0.98
+  yang_ratio_thresh: 0.6
+  gain_limit: 30.0
+  eff_thresh: 0.005
+  eff_ratio_thresh: 50.0
+  turnover_low: 2.0
+  turnover_high: 10.0
+  volratio_low: 1.2
+  volratio_high: 4.0
+  mv_low: 50.0
+  mv_high: 500.0
+  bench_ma: 20
+  min_listed_days: 60
+  enable: {}
