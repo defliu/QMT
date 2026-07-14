@@ -130,6 +130,18 @@ C成本校准trades CSV已失效。结论需结合此性质判断。
 
 <!-- 结论 -->
 <div class="card">
+  <h2>G. T009 精简505回测验证 <span class="tag tag-real">真实回测</span></h2>
+  <div class="note">universe=top1000活跃股 · 60天 · 每5天rebal · ge-60等权cap5 · 简化持有(无sell engine)</div>
+  <table id="t009tbl">
+    <thead><tr><th>组</th><th>累计收益</th><th>回撤</th><th>夏普</th><th>笔数</th><th>vs原版</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="chart-box"><canvas id="t009ret"></canvas></div>
+  <div class="note">结论: 精简505(移C2/C6/C7)反而<b style="color:var(--down)">降-6.48pp</b>失败; 505各条件协同不可精简; 原版505最优(C1-C7)。505过滤本身有价值(+9.89pp vs无过滤)。</div>
+</div>
+
+<!-- 结论 -->
+<div class="card">
   <h2>🎯 统一结论</h2>
   <div class="kpi">
     <div class="kpi-item">评分器IC<b class="neg">显著为负</b>(两路径)</div>
@@ -138,6 +150,8 @@ C成本校准trades CSV已失效。结论需结合此性质判断。
     <div class="kpi-item">alpha在pool<b class="pos">C1+C5</b></div>
     <div class="kpi-item">评分器<b class="neu">regime-dependent</b>(牛正/熊负)</div>
     <div class="kpi-item">P3<b class="neg">全淘汰</b></div>
+    <div class="kpi-item">精简505<b class="neg">失败-6.48pp</b></div>
+    <div class="kpi-item">原版505<b class="pos">最优不可动</b></div>
   </div>
   <div class="note">6+2评分器非稳健截面预测器(全周期IC负),作≥60过滤器牛市可保留(击败TopN)但需大盘择时避熊; alpha主要在pool(505的C1收盘站上MA5+C5收阳); 505优化方向是精简(移C2负/C6/C7冗余)非叠加主升浪规则。</div>
 </div>
@@ -252,6 +266,25 @@ t008.forEach(x=>{
     <td>${x.corr}</td>
     <td>${x.el?'<span class="verdict neg-bg">淘汰</span>':'<span class="verdict pos-bg">保留</span>'}</td></tr>`;
 });
+
+// ===== G. T009 精简505 =====
+const t009=[
+  {g:'原版505(C1-C7)',r:29.28,d:10.80,s:2.42,n:45,base:true},
+  {g:'精简505(移C2/C6/C7)',r:22.80,d:10.80,s:2.01,n:45},
+  {g:'无505过滤',r:19.39,d:5.84,s:2.40,n:45},
+];
+const t009tb=document.querySelector('#t009tbl tbody');
+t009.forEach(x=>{
+  const vs=x.base?'<span class="neu">基线</span>':(x.r<29.28?'<span class="neg">↓'+(29.28-x.r).toFixed(2)+'pp</span>':'<span class="pos">↑</span>');
+  t009tb.innerHTML+=`<tr>
+    <td>${x.g}</td>
+    <td class="${cls(x.r)}">+${fmt(x.r)}%</td>
+    <td class="${x.d>10?'neg':'neu'}">${fmt(x.d)}%</td>
+    <td class="${x.s>=2.3?'pos':'neg'}">${fmt(x.s,2)}</td>
+    <td>${x.n}</td>
+    <td>${vs}</td></tr>`;
+});
+mkBar('t009ret','累计收益(%)',t009.map(x=>x.g),t009.map(x=>x.r),v=>v>=25?UP_A:(v>=20?NEU_A:DOWN_A));
 
 // ===== Chart helper (A股红涨绿跌硬编码色值) =====
 function mkBar(id,title,labels,vals,colorFn,opt={}){
