@@ -28,6 +28,8 @@ from core.signal_main_rise import REQUIRED_BARS, MIN_BARS
 from core.signal_main_rise import MARKET_INDEX_CODE, MARKET_MA20, MARKET_MA60
 from core.signal_main_rise import SECTOR_HOT_TOP_N
 from core.risk_manager import Action, SellDecision, SellPositionState, SellStrategyEngine, get_trade_state_reason, format_plan_b_diagnosis
+from core.risk_manager import REGIME_BULL, REGIME_NEUTRAL, REGIME_BEAR, REGIME_CRASH
+from core.risk_manager import merge_positions_data, SOURCE_TAG_MANUAL, SOURCE_TAG_DEFAULT
 
 
 _DEFAULT_CONFIG = {
@@ -35,6 +37,8 @@ _DEFAULT_CONFIG = {
         'name': 'DUAL_BAND',
         'display_name': '主升浪6+2',
         'capital_base': 100000,
+        'max_hold': 3,
+        'target_ratio': 0.30,
     },
     'paths': {
         'pool_file': 'D:/QMT_POOL/QMTselected.txt',
@@ -155,14 +159,15 @@ _strategy_config = _full_config.get('strategy', {})
 ACCOUNT_ID = '67014907'
 STRATEGY_KEY = _strategy_config.get('name', 'DUAL_BAND')
 STRATEGY_NAME = _strategy_config.get('display_name', STRATEGY_KEY)
-STRATEGY_VERSION = 'v2026.07.03-observability'
+STRATEGY_VERSION = 'v2026.07.13-risk_engine_strategy_exit'
 
 STRATEGY_CAPITAL = float(_strategy_config.get('capital_base', 100000))
-MAX_HOLD = 3
-TARGET_RATIO = 0.30
+MAX_HOLD = int(_strategy_config.get('max_hold', 3))
+TARGET_RATIO = float(_strategy_config.get('target_ratio', 0.30))
 MAX_TOTAL_RATIO = 0.90
 FIXED_AMOUNT_PER_STOCK = 30000
 HARD_STOP_LOSS = -0.08
+DAILY_MAX_LOSS_PCT = float(_strategy_config.get('daily_max_loss_pct', -0.03))
 N_SELL = 7
 
 BATCH_SIZE = 500
@@ -226,6 +231,8 @@ _g_scorer = None
 _g_all_data = {}
 _g_stock_list = []
 _g_index_data = None
+# [1b-2] 买入侧专用：管理持仓状态（名额MAX_HOLD/仓位/重复买入排除）。
+# 风控侧已独立（引擎 state 自管 highest 等），不再依赖 _g_my_codes 传 highest。
 _g_my_codes = {}
 _g_cumulative_pnl = 0.0
 _g_last_date = ''
@@ -246,12 +253,17 @@ PREMARKET_HARD_STOP_MODE = 'G3_ONLY'  # 'OFF' / 'G3_ONLY' / 'G2_AND_G3'  0703结
 _g_premarket_check_done = False       # 单日跑一次的防重入 flag（日切清空）
 _g_premarket_orders = {}              # code -> {order_id, grade, price, shares, ref_price}
 
+# ===== 日内亏损熔断 =====
+_g_day_start_nav = 0.0               # 当日开盘净值
+_g_daily_circuit_breaker = False     # 熔断标记（当日禁止买入）
+
 _g_per_stock_amount = 0
 _g_pending_sells = {}
 _g_pending_limitdown_sells = {}  # {code: {info dict}} - limit-down deferred sell queue
 _g_sell_engine = None
 _g_op_executed = {}  # {operation_point_str: bool} - 操作点执行记录（全天版）
 _g_startup_done = False  # 启动时是否已执行全流程（全天版）
+_g_market_regime = REGIME_NEUTRAL  # P2-6: 大盘环境感知
 
 # 防刷屏守卫
 _g_last_sell_fingerprint = ''    # 上次打印的诊断指纹，无变化时不重复打印
@@ -277,64 +289,6 @@ BUY_LOOKUP_INTERVAL = 0.2
 _g_log_entries = []  # [(timestamp, message), ...]
 _g_trade_records = []  # [{type, code, direction, volume, price, amount, status}, ...]
 _g_log_written_today = False
-
-
-# ============================================================
-#  策略日志
-# ============================================================
-
-def _append_log(timestamp=None, message=''):
-    global _g_log_entries
-    # NOTE: safemode日志时间用设备时间（拿不到C，且safemode当前disabled，不影响交易决策）
-    ts = timestamp or datetime.now().strftime('%H:%M:%S')
-    _g_log_entries.append((ts, message))
-
-
-def _reset_log_buffers():
-    global _g_log_entries, _g_trade_records, _g_log_written_today
-    _g_log_entries = []
-    _g_trade_records = []
-    _g_log_written_today = False
-
-
-# ============================================================
-#  SAFEMODE 安全壳
-# ============================================================
-
-def _safemode_log_trade_blocked(stock_code, direction, volume, price, remark, source_function):
-    """记录被拦截的交易到 CSV 日志。"""
-    if not SAFEMODE_ENABLED:
-        return
-    os.makedirs(SAFEMODE_LOG_DIR, exist_ok=True)
-    # NOTE: safemode日志时间用设备时间（拿不到C，且safemode当前disabled，不影响交易决策）
-    today = datetime.now().strftime('%Y%m%d')
-    log_path = os.path.join(SAFEMODE_LOG_DIR, 'trades_blocked_%s.csv' % today)
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    import csv
-    file_exists = os.path.exists(log_path)
-    with open(log_path, 'a', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        if not file_exists:
-            writer.writerow(['timestamp', 'stock_code', 'direction', 'volume', 'price', 'remark', 'source_function'])
-        writer.writerow([timestamp, stock_code, direction, volume, price, remark, source_function])
-
-
-def _safemode_log_signal(stock_code, score_8d, buy_points, sector_heat, details=None):
-    """记录信号日志到 CSV。"""
-    if not SAFEMODE_ENABLED:
-        return
-    os.makedirs(SAFEMODE_LOG_DIR, exist_ok=True)
-    # NOTE: safemode日志时间用设备时间（拿不到C，且safemode当前disabled，不影响交易决策）
-    today = datetime.now().strftime('%Y%m%d')
-    log_path = os.path.join(SAFEMODE_LOG_DIR, 'signals_%s.csv' % today)
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    import csv
-    file_exists = os.path.exists(log_path)
-    with open(log_path, 'a', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        if not file_exists:
-            writer.writerow(['timestamp', 'stock_code', 'score_8d', 'buy_points', 'sector_heat'])
-        writer.writerow([timestamp, stock_code, score_8d, buy_points, sector_heat])
 
 
 # ============================================================
@@ -407,6 +361,9 @@ class Trader:
             from datetime import datetime as _dt
             return "safemode_" + _dt.now().strftime('%Y%m%d%H%M%S%f')
         vol = (volume // 100) * 100
+        if _is_star_market_stock(stock_code) and vol < 200:
+            print("[交易] 买入 %s 科创板最低200股，算出%d股不足，跳过不买（避免废单）" % (stock_code, vol))
+            return None
         if vol < 100:
             print("[交易] 买入 %s 数量不足100股: %s" % (stock_code, volume))
             return None
@@ -421,7 +378,24 @@ class Trader:
                 break
             time.sleep(BUY_LOOKUP_INTERVAL)
         if order_id is None:
-            print("  [买入反查失败] %s %d股 委托可能未到达交易所" % (stock_code, vol))
+            try:
+                _fail_orders = get_trade_detail_data(self.acct, self.acct_type, 'order')
+                _mine = [o for o in (_fail_orders or [])
+                         if ("%s.%s" % (getattr(o, 'm_strInstrumentID', ''), getattr(o, 'm_strExchangeID', '')) == stock_code)]
+                if not _mine:
+                    print("  [买入] %s %d股 反查失败且订单簿无记录，可能未到交易所，可重试" % (stock_code, vol))
+                else:
+                    _st = getattr(_mine[-1], 'm_nOrderStatus', None)
+                    if _st == 9:
+                        print("  [买入] %s %d股 废单(状态9)，不重试，转补买" % (stock_code, vol))
+                    elif _st == 2:
+                        _found_id = getattr(_mine[-1], 'm_nOrderID', None)
+                        print("  [买入] %s %d股 已报单(状态2)排队未成交，返回订单号=%s" % (stock_code, vol, _found_id))
+                        return _found_id
+                    else:
+                        print("  [买入] %s %d股 反查失败状态=%s，不重试，转补买" % (stock_code, vol, _st))
+            except Exception as _qe:
+                print("  [买入] %s 反查失败诊断异常: %s" % (stock_code, _qe))
             return None
         return order_id
 
@@ -823,6 +797,11 @@ def _sync_holdings_from_account(C, today):
         print("  [持仓纳管] 查询全量持仓失败: %s" % e)
     if adopted:
         print("  [持仓纳管] 发现 %d 只账户持仓未纳管，已纳入: %s" % (len(adopted), sorted(adopted)))
+        for code in adopted:
+            if _g_sell_engine is not None:
+                state = _g_sell_engine._states.get(code)
+                if state is not None and not getattr(state, 'source_tag', ''):
+                    state.source_tag = SOURCE_TAG_MANUAL
         try:
             write_holdings_file(INTRADAY_HOLD_FILE, _g_my_codes)
         except Exception as e:
@@ -836,19 +815,6 @@ def _sync_holdings_from_account(C, today):
         if pos and pos.get('volume', 0) > 0:
             held.add(code)
     return held
-
-
-def _log_holdings_reconcile(C, tag):
-    try:
-        acct_codes = set(_g_trader.get_holdings().keys()) if _g_trader else set()
-        my_codes = set(_g_my_codes.keys())
-        only_acct = acct_codes - my_codes
-        only_my = my_codes - acct_codes
-        print("  [对账] %s _g_my_codes(%d只) vs account(%d只)" % (tag, len(my_codes), len(acct_codes)))
-        if only_acct or only_my:
-            print("  [对账告警] %s 仅账户=%s 仅策略=%s" % (tag, sorted(only_acct), sorted(only_my)))
-    except Exception as e:
-        print("  [对账] %s 失败: %s" % (tag, e))
 
 
 def read_nav_file(filepath):
@@ -935,205 +901,6 @@ def rebuild_cumulative_pnl_from_csv():
     print("  [重建] 扫描 %d 个持仓明细CSV，清仓股 %d 只，累计已实现盈亏=%+.2f" % (
         len(files), len(closed_pnl), total))
     return total
-
-
-# ============================================================
-#  每日数据导出（成交/持仓/资金 CSV）
-# ============================================================
-
-EXPORT_OUTPUT_DIR = r'D:\qmt_pool'
-
-
-def _is_export_time():
-    """工作日 15:00 后才允许导出。周末/盘前返回 False。"""
-    now = datetime.now()
-    if now.weekday() >= 5:
-        return False
-    hm = now.strftime('%H%M')
-    if hm < '1500':
-        return False
-    return True
-
-
-def _export_safe_attr(obj, attr, default=''):
-    if attr is None or attr == '':
-        return default
-    try:
-        val = getattr(obj, attr, None)
-        if val is None:
-            return default
-        return str(val)
-    except Exception:
-        return default
-
-
-def _export_fmt_amount(obj, attr):
-    try:
-        val = getattr(obj, attr, None)
-        if val is None:
-            return ''
-        return '%.2f' % float(val)
-    except Exception:
-        return ''
-
-
-def _export_fmt_int(obj, attr):
-    try:
-        val = getattr(obj, attr, None)
-        if val is None:
-            return ''
-        return str(int(val))
-    except Exception:
-        return ''
-
-
-def _export_fmt_pct(obj, attr, multiply=True):
-    try:
-        val = getattr(obj, attr, None)
-        if val is None:
-            return ''
-        v = float(val)
-        if multiply:
-            v = v * 100.0
-        return '%.2f' % v
-    except Exception:
-        return ''
-
-
-def export_deals(ContextInfo):
-    deals = get_trade_detail_data(ACCOUNT_ID, 'STOCK', 'deal')
-    date_str = datetime.now().strftime('%Y%m%d')
-    filepath = os.path.join(EXPORT_OUTPUT_DIR, '成交明细_%s.csv' % date_str)
-    header = '资金账号,成交日期,成交时间,交易所,证券代码,证券名称,买卖标记,成交数量,成交价格,成交金额,手续费,成交编号,合同编号,订单编号,任务编号,投资备注,账号备注,分支机构,投资备注1,股东号'
-    with open(filepath, 'w', encoding='gbk') as f:
-        f.write(header + '\n')
-        for deal in deals:
-            row = ','.join([
-                _export_safe_attr(deal, 'm_strAccountID'),
-                _export_safe_attr(deal, 'm_strTradeDate'),
-                _export_safe_attr(deal, 'm_strTradeTime'),
-                _export_safe_attr(deal, 'm_strExchangeID'),
-                _export_safe_attr(deal, 'm_strInstrumentID'),
-                _export_safe_attr(deal, 'm_strInstrumentName'),
-                _export_safe_attr(deal, 'm_strOptName'),
-                _export_fmt_int(deal, 'm_nVolume'),
-                _export_fmt_amount(deal, 'm_dPrice'),
-                _export_fmt_amount(deal, 'm_dTradeAmount'),
-                _export_fmt_amount(deal, 'm_dCommission'),
-                _export_safe_attr(deal, 'm_strTradeID'),
-                _export_safe_attr(deal, 'm_strOrderSysID'),
-                _export_safe_attr(deal, 'm_strOrderRef'),
-                _export_safe_attr(deal, 'm_strCompactNo'),
-                '',
-                _export_safe_attr(deal, 'm_strAccountRemark'),
-                '',
-                '',
-                '',
-            ])
-            f.write(row + '\n')
-    print('[导出] 成交明细 %d 条 -> %s' % (len(deals), filepath))
-    return filepath
-
-
-def export_positions(ContextInfo):
-    positions = get_trade_detail_data(ACCOUNT_ID, 'STOCK', 'position')
-    date_str = datetime.now().strftime('%Y%m%d')
-    filepath = os.path.join(EXPORT_OUTPUT_DIR, '持仓明细_%s.csv' % date_str)
-    header = '资金账号,交易所,证券代码,证券名称,当前拥股,可用数量,冻结数量,成本价,最新价,持仓盈亏,浮动盈亏,盈亏比例,当日涨幅,市值,持仓成本,股东账号,市场名称,资产占比,市值占比,状态,分支机构,非流通股,当日盈亏'
-    with open(filepath, 'w', encoding='gbk') as f:
-        f.write(header + '\n')
-        for pos in positions:
-            row = ','.join([
-                _export_safe_attr(pos, 'm_strAccountID'),
-                _export_safe_attr(pos, 'm_strExchangeID'),
-                _export_safe_attr(pos, 'm_strInstrumentID'),
-                _export_safe_attr(pos, 'm_strInstrumentName'),
-                _export_fmt_int(pos, 'm_nVolume'),
-                _export_fmt_int(pos, 'm_nCanUseVolume'),
-                _export_fmt_int(pos, 'm_nFrozenVolume'),
-                _export_fmt_amount(pos, 'm_dOpenPrice'),
-                _export_fmt_amount(pos, 'm_dLastPrice'),
-                _export_fmt_amount(pos, 'm_dPositionProfit'),
-                _export_fmt_amount(pos, 'm_dFloatProfit'),
-                _export_fmt_pct(pos, 'm_dProfitRate', multiply=True),
-                '',
-                _export_fmt_amount(pos, 'm_dMarketValue'),
-                _export_fmt_amount(pos, 'm_dPositionCost'),
-                _export_safe_attr(pos, 'm_strStockHolder'),
-                _export_safe_attr(pos, 'm_strExchangeName'),
-                '',
-                '',
-                '',
-                '',
-                '',
-                '',
-            ])
-            f.write(row + '\n')
-    print('[导出] 持仓明细 %d 条 -> %s' % (len(positions), filepath))
-    return filepath
-
-
-def export_account(ContextInfo):
-    accounts = get_trade_detail_data(ACCOUNT_ID, 'STOCK', 'account')
-    date_str = datetime.now().strftime('%Y%m%d')
-    filepath = os.path.join(EXPORT_OUTPUT_DIR, '资金概况_%s.csv' % date_str)
-    header = '资金账号,账号名称,账号备注,登录状态,操作,总资产,净资产,总负债,总市值,可用金额,冻结金额,持仓盈亏,手续费,可取金额,股票总市值,基金总市值,债券总市值,回购总市值,报撤单比,分支机构,资金余额,今日账号盈亏'
-    with open(filepath, 'w', encoding='gbk') as f:
-        f.write(header + '\n')
-        for acc in accounts:
-            row = ','.join([
-                _export_safe_attr(acc, 'm_strAccountID'),
-                '',
-                _export_safe_attr(acc, 'm_strAccountRemark'),
-                _export_safe_attr(acc, 'm_strStatus'),
-                '',
-                _export_fmt_amount(acc, 'm_dAssetBalance'),
-                '',
-                _export_fmt_amount(acc, 'm_dTotalDebit'),
-                _export_fmt_amount(acc, 'm_dStockValue'),
-                _export_fmt_amount(acc, 'm_dAvailable'),
-                _export_fmt_amount(acc, 'm_dFrozenCash'),
-                _export_fmt_amount(acc, 'm_dPositionProfit'),
-                _export_fmt_amount(acc, 'm_dCommission'),
-                _export_fmt_amount(acc, 'm_dFetchBalance'),
-                _export_fmt_amount(acc, 'm_dStockValue'),
-                _export_fmt_amount(acc, 'm_dFundValue'),
-                '',
-                _export_fmt_amount(acc, 'm_dRepurchaseValue'),
-                '',
-                _export_safe_attr(acc, 'm_strBrokerName'),
-                _export_fmt_amount(acc, 'm_dBalance'),
-                '',
-            ])
-            f.write(row + '\n')
-        print('[导出] 资金概况 %d 条 -> %s' % (len(accounts), filepath))
-    return filepath
-
-
-def export_daily_data(ContextInfo):
-    """主入口：导出所有数据。带时间锁，非工作日15:05后跳过。"""
-    if not _is_export_time():
-        print('[导出] 非工作日15:05后，跳过 (now=%s)' % datetime.now().strftime('%Y-%m-%d %H:%M'))
-        return []
-    files = []
-    try:
-        files.append(export_deals(ContextInfo))
-    except Exception as e:
-        print('[导出] 成交明细失败: %s' % e)
-    try:
-        files.append(export_positions(ContextInfo))
-    except Exception as e:
-        print('[导出] 持仓明细失败: %s' % e)
-    try:
-        files.append(export_account(ContextInfo))
-    except Exception as e:
-        print('[导出] 资金概况失败: %s' % e)
-    _ok = [f for f in files if f]
-    if _ok:
-        print('[导出] 完成 产出%d文件: %s' % (len(_ok), _ok))
-    else:
-        print('[导出] 完成 但无文件产出（检查各 export_* 是否异常）')
-    return files
 
 
 def calc_floating_pnl(account_id, account_type='STOCK'):
@@ -1315,6 +1082,7 @@ def _load_data(C, dt=None):
 
     _append_log('数据加载: %d只, 大盘%s' % (len(_g_all_data), MARKET_INDEX_CODE))
     print("  数据加载完成")
+    _update_market_regime()  # P2-6: 初始加载时计算大盘环境
 
 
 def _run_sector_analysis(C, dt):
@@ -1531,6 +1299,24 @@ def _refresh_trade_data(C):
         print("  大盘数据刷新失败: %s" % e)
 
     print("  [数据刷新] 股票池 %d 只 + 持仓 %d 只, 行情已更新" % (len(target_codes), len(_g_my_codes)))
+    _update_market_regime()  # P2-6: 盘中刷新 market_regime（每轮数据刷新时重算大盘环境）
+
+
+def _update_market_regime():
+    """P2-6: 基于上证指数数据计算大盘环境，更新全局 _g_market_regime。
+    TODO: 15分钟级盘中暴跌信号待接入分钟数据（日级盘中刷新已落地）。
+    """
+    global _g_market_regime, _g_index_data
+    if _g_sell_engine is None or _g_index_data is None:
+        _g_market_regime = REGIME_NEUTRAL
+        return
+    try:
+        regime = _g_sell_engine._judge_market_regime(_g_index_data)
+        _g_market_regime = regime
+        print("  [大盘感知] regime=%s" % regime)
+    except Exception as e:
+        print("  [大盘感知] 判断异常: %s, 默认NEUTRAL" % e)
+        _g_market_regime = REGIME_NEUTRAL
 
 
 # ============================================================
@@ -2421,6 +2207,10 @@ def _log_premarket_diagnostic(C, today, now):
         print("    [P3诊断] 整体异常: %s" % e)
 
 
+# [1b-2] 盘前硬止损参数文档：
+# 盘前（09:25-09:29:59）使用更紧的 -5%/-7% 阈值，因盘前不确定性大，需要更早触发保护。
+# 盘中底线层使用 -8% 阈值（risk_manager.py），因盘中流动性好，可承受更大波动。
+# 两套参数独立合理，盘前保护优先级高于盘中底线。TODO：盘前逻辑是否统一进引擎 pre_market 模式，待诚哥定。
 def _check_pre_market_hard_stop(C, today, now):
     """09:25-09:29:59 集合竞价锁定区扫描持仓，按 grade 决定是否预埋硬止损单。
     单日只跑一次，由 _g_premarket_check_done 守护。
@@ -2581,10 +2371,19 @@ def _check_and_execute_sell(C, today, allowed_layers=None):
     for code in _g_my_codes:
         pos = _g_trader.get_position(code)
         if pos:
-            positions_data[code] = pos
+            pos_info = dict(pos)
+            state_obj = _g_sell_engine._states.get(code) if _g_sell_engine else None
+            pos_info['source_tag'] = getattr(state_obj, 'source_tag', SOURCE_TAG_DEFAULT) if state_obj else SOURCE_TAG_DEFAULT
+            positions_data[code] = pos_info
+
+    # P1-5: 构建股票名称映射（实盘 ST 检测用）
+    stock_names = {}
+    for code in _g_my_codes:
+        stock_names[code] = _get_stock_name_safe(C, code)
 
     rt_prices = _get_current_prices(list(_g_my_codes.keys()), C)
-    raw_decisions = _g_sell_engine.evaluate(today, _g_my_codes, _g_all_data, positions_data, rt_prices)
+    raw_decisions = _g_sell_engine.evaluate(today, _g_my_codes, _g_all_data, positions_data, rt_prices,
+                                            market_regime=_g_market_regime, stock_names=stock_names)
 
     # ===== 评估可观测性：每只持仓打一行评估摘要（防刷屏：每票每日只打一次） =====
     if _g_my_codes:
@@ -3013,6 +2812,11 @@ def _try_buy_replacement(C, remark):
         if _g_sell_engine and not _g_sell_engine.is_reentry_allowed(code, today, _g_all_data.get(code)):
             print("  [补买禁入] %s 仍在20日禁入期，跳过" % code)
             continue
+        if _g_sell_engine is not None:
+            allowed, reason = _g_sell_engine.is_add_position_allowed(code)
+            if not allowed:
+                print("  [补买拦截] %s %s" % (code, reason))
+                continue
         if _is_limit_up(code, C):
             print("  [补买] %s 涨停，跳过" % code)
             continue
@@ -3091,6 +2895,14 @@ def _try_retry_queue(C):
             print("  [重试放弃] %s 金额不足100股，转补买" % code)
             _try_buy_replacement(C, '补买')
             continue
+
+        old_info = _g_pending_buys.get(code)
+        if old_info and old_info.get('order_id'):
+            try:
+                _g_trader.cancel_order(old_info['order_id'], code)
+                print("  [重试撤旧] %s 撤旧单 %s 后再补新单" % (code, old_info['order_id']))
+            except Exception as _ce:
+                print("  [重试撤旧] %s 撤旧单失败(不阻塞): %s" % (code, _ce))
 
         order_id = _g_trader.buy(code, volume, remark='重试')
         if order_id is not None:
@@ -3214,8 +3026,30 @@ def _check_pending_orders(C):
 #  交易执行主流程
 # ============================================================
 
+def _check_daily_circuit_breaker():
+    """检查日内亏损熔断：当前亏损超过阈值则禁止买入。
+    返回 True 表示已熔断（应跳过买入），False 表示正常。
+    """
+    if _g_sell_engine is None:
+        return False
+
+    try:
+        if _g_trader:
+            current_asset = _g_trader.get_total_asset()
+        else:
+            return False
+    except Exception:
+        return False
+
+    allowed, _reason = _g_sell_engine.is_buy_allowed(current_asset, STRATEGY_CAPITAL)
+    return not allowed
+
+
 def _execute_trade(C, today, dt):
     global _g_my_codes, _g_pending_buys, _g_pending_sells, _g_pending_limitdown_sells
+
+    if _check_daily_circuit_breaker():
+        return True
 
     _refresh_trade_data(C)
     # 买入前再校验实际持仓，防止盘中已清仓的票残留占名额
@@ -3329,6 +3163,7 @@ def _execute_trade(C, today, dt):
     # 用同步后实际有持仓的票数算名额，避免已清仓票残留占名额
     actual_held = _sync_holdings_from_account(C, today)
     already_held = actual_held | set(_g_my_codes.keys()) | 对方持仓集 | set(_g_pending_buys.keys())
+    per_stock_amount_est = int(current_nav * TARGET_RATIO / 100) * 100
     buyable = []
     for s in scored:
         code = s['code']
@@ -3337,6 +3172,12 @@ def _execute_trade(C, today, dt):
         if _g_sell_engine and not _g_sell_engine.is_reentry_allowed(code, today, _g_all_data.get(code)):
             print("  [禁止再入] %s 仍在20日禁止期内，跳过" % code)
             continue
+        price = _get_current_price(code, C)
+        if price and price > 0:
+            min_lot_cost = price * 100
+            if per_stock_amount_est < min_lot_cost:
+                print("  [可买性过滤] %s 股价%.2f 单只预算%d买不起1手(需%.0f)，跳过让候补顶上" % (code, price, per_stock_amount_est, min_lot_cost))
+                continue
         buyable.append(s)
 
     if not buyable:
@@ -3449,6 +3290,11 @@ def _execute_trade(C, today, dt):
         if _is_limit_up(code, C):
             print("    - 跳过 %s  涨停" % code)
             continue
+        if _g_sell_engine is not None:
+            allowed, reason = _g_sell_engine.is_add_position_allowed(code)
+            if not allowed:
+                print("    - 跳过 %s  %s" % (code, reason))
+                continue
         price = _get_current_price(code, C)
         if price and price > 0:
             volume = int(per_stock_amount / price / 100) * 100
@@ -3472,6 +3318,8 @@ def _execute_trade(C, today, dt):
                         'retries': 0,
                     })
                     print("    [委托失败] %s %d股  已加入重试队列" % (code, volume))
+            else:
+                print("    [买入] %s 预算%d股价%.2f买不起1手(算出%d股<100)" % (code, per_stock_amount, price, volume))
         else:
             print("    - 跳过 %s  无法获取价格" % code)
 
@@ -3610,6 +3458,9 @@ def _execute_full_cycle(C, today, dt):
     """全流程：加载数据→评分池候选+持仓→决策执行"""
     global _g_data_loaded, _g_all_data, _g_my_codes, _g_scorer, _g_sell_engine
 
+    if _check_daily_circuit_breaker():
+        return
+
     if not _g_data_loaded:
         _load_data(C, dt)
         _g_data_loaded = True
@@ -3678,10 +3529,19 @@ def _all_day_decision_matrix(C, today, dt, scored_candidates, held_scores):
     for code in _g_my_codes:
         pos = _g_trader.get_position(code)
         if pos:
-            positions_data[code] = pos
+            pos_info = dict(pos)
+            state_obj = _g_sell_engine._states.get(code) if _g_sell_engine else None
+            pos_info['source_tag'] = getattr(state_obj, 'source_tag', SOURCE_TAG_DEFAULT) if state_obj else SOURCE_TAG_DEFAULT
+            positions_data[code] = pos_info
+
+    # P1-5: 构建股票名称映射（实盘 ST 检测用）
+    stock_names = {}
+    for code in _g_my_codes:
+        stock_names[code] = _get_stock_name_safe(C, code)
 
     rt_prices = _get_current_prices(list(_g_my_codes.keys()), C)
-    raw_decisions = _g_sell_engine.evaluate(today, _g_my_codes, _g_all_data, positions_data, rt_prices)
+    raw_decisions = _g_sell_engine.evaluate(today, _g_my_codes, _g_all_data, positions_data, rt_prices,
+                                            market_regime=_g_market_regime, stock_names=stock_names)
 
     for code, dec, shares in raw_decisions:
         df = _g_all_data.get(code)
@@ -3860,6 +3720,13 @@ def _place_buy_order(C, code, today, dt, per_stock_amount):
     except Exception as e:
         print("    [买入拦截] %s 查询持仓异常: %s" % (code, e))
 
+    # P2-4 仓位联动：浮亏>10%禁止加仓
+    if _g_sell_engine is not None:
+        allowed, reason = _g_sell_engine.is_add_position_allowed(code)
+        if not allowed:
+            print("    [买入拦截] %s %s" % (code, reason))
+            return
+
     price = _get_current_price(code, C)
     if not price or price <= 0:
         print("    [买入] %s 无法获取价格" % code)
@@ -3944,8 +3811,10 @@ class StrategyRunner(object):
             state_file=INTRADAY_SELL_STATE_FILE,
             is_intraday=False,
             hard_stop_loss=HARD_STOP_LOSS,
+            daily_max_loss_pct=DAILY_MAX_LOSS_PCT,
         )
         _g_sell_engine.load_state()
+        _g_sell_engine.set_day_start_nav(current_nav)
         print("  [init] 卖出引擎初始化+状态加载 耗时%.2fs" % (time.time() - _t0))
 
         _g_strategy_start_ts = time.time()
@@ -3966,17 +3835,6 @@ class StrategyRunner(object):
             STRATEGY_NAME, MAX_HOLD,
             "买入窗口=调试模式-全天候" if DEBUG_MODE else "买入窗口=%s（数据含当天日线）" % BUY_WINDOW_LABEL))
         print("[%s] K线周期请设为「1分钟」" % STRATEGY_NAME)
-
-        # 盘后部署立即导出当日数据（Hermes 每日数据，防忘）
-        # 带 _is_export_time 时间锁：盘中启动跳过，盘后(>=15:05工作日)立即导
-        if not _g_exported_today:
-            try:
-                files = export_daily_data(C)
-                if files:
-                    _g_exported_today = True
-                    print("  [导出] init 盘后部署导出完成: %d 个文件" % len(files))
-            except Exception as e:
-                print("  [导出] init 自动导出失败: %s" % e)
 
     def handlebar(self, C):
         try:
@@ -4014,8 +3872,11 @@ class StrategyRunner(object):
             _g_phase_printed.clear()
             _g_premarket_check_done = False
             _g_premarket_orders = {}
+            if _g_sell_engine:
+                _g_sell_engine.reset_daily_breaker()
             _g_my_codes = read_holdings_file(INTRADAY_HOLD_FILE)
             _g_cumulative_pnl = read_nav_file(CUMULATIVE_PNL_FILE)
+            _g_market_regime = REGIME_NEUTRAL
             _g_pending_buys = {}
             _g_retry_queue = []
             _g_candidate_queue = []
@@ -4110,14 +3971,6 @@ class StrategyRunner(object):
                 _print_holdings_report(C, today)
                 _g_today_done = True
             _write_daily_log(today, C)
-            # 15:00 收盘帧自动导出当日 CSV（Hermes 每日数据，防忘）
-            if now >= '1500' and not _g_exported_today:
-                try:
-                    export_daily_data(C)
-                    _g_exported_today = True
-                    _log_holdings_reconcile(C, 'close')
-                except Exception as e:
-                    print('  [导出] 自动导出失败: %s' % e)
 
         if _g_today_done:
             return
