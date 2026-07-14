@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Project 12.7 评分器+Pool优化 回测看板</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --up:#e74c3c;      /* A股红: 涨/正/盈利/正预测 */
+    --down:#27ae60;    /* A股绿: 跌/负/亏损/负预测 */
+    --neutral:#95a5a6; /* 灰: 中性/不显著 */
+    --warn:#f39c12;    /* 橙: 警告/数据缺口 */
+    --bg:#f5f7fa;--card:#fff;--text:#2c3e50;--muted:#7f8c8d;--border:#e1e8ed;
+    --pos-bg:rgba(231,76,60,.12);--neg-bg:rgba(39,174,96,.12);--neu-bg:rgba(149,165,166,.10);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;padding:20px}
+  h1{font-size:24px;margin-bottom:4px}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:16px}
+  .alert{background:#fff8e1;border-left:4px solid var(--warn);padding:12px 16px;border-radius:6px;margin-bottom:20px;font-size:13px}
+  .alert b{color:#e67e22}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;margin-bottom:20px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+  .card h2{font-size:15px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+  .tag{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;white-space:nowrap}
+  .tag-real{background:var(--pos-bg);color:var(--up)}
+  .tag-proxy{background:var(--neu-bg);color:var(--neutral)}
+  .tag-warn{background:#fff3cd;color:#856404}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--border)}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--muted);font-weight:600;font-size:12px}
+  tr:hover td{background:#fafbfc}
+  .pos{color:var(--up);font-weight:700}
+  .neg{color:var(--down);font-weight:700}
+  .neu{color:var(--neutral)}
+  .pos-bg{background:var(--pos-bg)}
+  .neg-bg{background:var(--neg-bg)}
+  .chart-box{height:240px;margin-top:12px;position:relative}
+  .kpi{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+  .kpi-item{background:var(--bg);padding:8px 12px;border-radius:6px;font-size:12px}
+  .kpi-item b{display:block;font-size:18px;margin-top:2px}
+  .footer{color:var(--muted);font-size:11px;text-align:center;margin-top:24px;border-top:1px solid var(--border);padding-top:12px}
+  .note{font-size:11px;color:var(--muted);margin-top:6px}
+  .verdict{font-size:12px;padding:4px 8px;border-radius:4px;font-weight:600}
+</style>
+</head>
+<body>
+
+<h1>Project 12.7 评分器迭代 + Pool优化 — 回测看板</h1>
+<div class="sub">CC · 2026-07-14 · 7/8任务完成(T006阻塞于TDX数据) · 配色:A股红涨绿跌</div>
+
+<div class="alert">
+<b>⚠ 数据性质:</b> A(T003)=<b>真实60天回测</b>(780股,raw无成本,但trade-level CSV被覆盖只留summary);
+B/C/D/E/F=<b>固定池IC/spread proxy</b>(astock历史数据2021-2026,固定50/248只非每日505池,有幸存者偏差);
+C成本校准trades CSV已失效。结论需结合此性质判断。
+</div>
+
+<!-- A. T003 阈值回测 -->
+<div class="card">
+  <h2>A. T003 阈值回测 <span class="tag tag-real">真实回测</span> <span class="tag tag-warn">raw无成本·CSV覆盖</span></h2>
+  <div class="note">60天 · 780股 · TopN vs ≥阈值正选 vs ≤阈值逆选</div>
+  <table id="t003tbl">
+    <thead><tr><th>变体</th><th>交易</th><th>总收益</th><th>回撤</th><th>夏普</th><th>胜率</th><th>vs基线</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="chart-box"><canvas id="t003ret"></canvas></div>
+  <div class="chart-box"><canvas id="t003sh"></canvas></div>
+</div>
+
+<div class="grid">
+<!-- B. T001 IC -->
+<div class="card">
+  <h2>B. T001 IC检验 <span class="tag tag-proxy">固定50池proxy</span></h2>
+  <div class="note">hfq · 2021-2026 · 249rebal · 置换500次</div>
+  <table id="t001tbl">
+    <thead><tr><th>路径/horizon</th><th>IC</th><th>ICIR</th><th>IC>0</th><th>p值</th><th>显著</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="chart-box"><canvas id="t001ic"></canvas></div>
+</div>
+
+<!-- C. 成本校准 -->
+<div class="card">
+  <h2>C. T001 成本校准 <span class="tag tag-proxy">回退后93笔</span> <span class="tag tag-warn">CSV失效</span></h2>
+  <div class="note">单边滑点0.5%+佣金万1+印花税千1(卖)</div>
+  <div class="kpi">
+    <div class="kpi-item">单笔raw<b class="pos">+3.36%</b></div>
+    <div class="kpi-item">单笔扣非<b class="pos">+2.21%</b></div>
+    <div class="kpi-item">成本拖累<b class="neg">-1.15%/笔</b></div>
+    <div class="kpi-item">胜率<b class="neg">54.8%→46.2%</b></div>
+    <div class="kpi-item">总P&L<b class="neg">30293→17258</b></div>
+  </div>
+  <div class="chart-box"><canvas id="cost"></canvas></div>
+</div>
+
+<!-- D. T004 归因 -->
+<div class="card">
+  <h2>D. T004 505逐条件归因 <span class="tag tag-proxy">固定248池proxy</span></h2>
+  <div class="note">spread = 通过组5d收益 - 未通过组(正=有效alpha来源)</div>
+  <table id="t004tbl">
+    <thead><tr><th>条件</th><th>名称</th><th>通过率</th><th>IC</th><th>spread</th><th>判定</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="chart-box"><canvas id="t004sp"></canvas></div>
+</div>
+
+<!-- E. T005 -->
+<div class="card">
+  <h2>E. T005 主升浪F1/F2/F3 <span class="tag tag-proxy">248池proxy</span></h2>
+  <div class="note">增量over505(正=加正交alpha)</div>
+  <table id="t005tbl">
+    <thead><tr><th>过滤</th><th>通过率</th><th>增量over505</th><th>建议</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<!-- F. T008 -->
+<div class="card">
+  <h2>F. T008 P3验证 <span class="tag tag-proxy">248池proxy</span></h2>
+  <div class="note">IC<0.02或共线>0.7淘汰</div>
+  <table id="t008tbl">
+    <thead><tr><th>P3维</th><th>IC</th><th>与P0最大相关</th><th>淘汰</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="note">龙虎榜:无可靠历史(仅当日实时),skip</div>
+</div>
+</div>
+
+<!-- 结论 -->
+<div class="card">
+  <h2>🎯 统一结论</h2>
+  <div class="kpi">
+    <div class="kpi-item">评分器IC<b class="neg">显著为负</b>(两路径)</div>
+    <div class="kpi-item">8维度全周期IC<b class="neg">全负</b></div>
+    <div class="kpi-item">ge-60过滤器<b class="pos">击败TopN</b>(牛市)</div>
+    <div class="kpi-item">alpha在pool<b class="pos">C1+C5</b></div>
+    <div class="kpi-item">评分器<b class="neu">regime-dependent</b>(牛正/熊负)</div>
+    <div class="kpi-item">P3<b class="neg">全淘汰</b></div>
+  </div>
+  <div class="note">6+2评分器非稳健截面预测器(全周期IC负),作≥60过滤器牛市可保留(击败TopN)但需大盘择时避熊; alpha主要在pool(505的C1收盘站上MA5+C5收阳); 505优化方向是精简(移C2负/C6/C7冗余)非叠加主升浪规则。</div>
+</div>
+
+<div class="footer">
+数据来源: backtest_6plus2_full.py(T003真实回测) / scripts/t001_/t004_/t005_/t007_/t008_.py(IC proxy) ·
+commits: 531c7cb 85f6eb6 c45de0e 22e5f0b 00a3eb0 65ee57a 8797403 86bef21 a504c25 0bfc660 ·
+生成: 2026-07-14
+</div>
+
+<script>
+const UP='#e74c3c',DOWN='#27ae60',NEU='#95a5a6',WARN='#f39c12';
+const UP_A='rgba(231,76,60,.78)',DOWN_A='rgba(39,174,96,.78)',NEU_A='rgba(149,165,166,.6)';
+const fmt=(v,dp=2)=>v==null?'-':Number(v).toFixed(dp);
+function cls(v){return v>0?'pos':(v<0?'neg':'neu');}
+function cls0(v){return v>0.0001?'pos':(v<-0.0001?'neg':'neu');}
+function verdict(s){return s>0.003?'<span class="verdict pos-bg">核心</span>':(s<=0?'<span class="verdict neg-bg">冗余</span>':'<span class="verdict" style="background:var(--neu-bg);color:var(--neutral)">弱正</span>');}
+
+// ===== A. T003 =====
+const t003=[
+  {v:'top(基线)',n:88,r:30.82,d:7.21,s:4.15,w:60.2,base:true},
+  {v:'ge-40',n:129,r:24.78,d:15.85,s:2.78,w:56.6},
+  {v:'ge-50',n:108,r:16.13,d:15.27,s:1.91,w:49.1},
+  {v:'ge-60',n:95,r:35.41,d:5.84,s:4.43,w:59.0},
+  {v:'ge-70',n:66,r:33.01,d:6.51,s:4.70,w:66.7},
+  {v:'le-60(逆向)',n:182,r:12.58,d:16.43,s:1.50,w:49.5},
+];
+const t003tb=document.querySelector('#t003tbl tbody');
+t003.forEach(x=>{
+  const vs=x.base?'<span class="neu">基线</span>':(x.r>30.82?'<span class="pos">↑击败</span>':'<span class="neg">↓落后</span>');
+  t003tb.innerHTML+=`<tr>
+    <td>${x.v}</td><td>${x.n}</td>
+    <td class="${cls(x.r)}">${x.r>0?'+':''}${fmt(x.r)}%</td>
+    <td class="${x.d>10?'neg':'neu'}">${fmt(x.d)}%</td>
+    <td class="${x.s>=4?'pos':'neg'}">${fmt(x.s,2)}</td>
+    <td class="${x.w>=50?'pos':'neg'}">${fmt(x.w,1)}%</td>
+    <td>${vs}</td></tr>`;
+});
+mkBar('t003ret','总收益(%)',t003.map(x=>x.v),t003.map(x=>x.r),v=>v>=0?UP_A:DOWN_A);
+mkBar('t003sh','夏普',t003.map(x=>x.v),t003.map(x=>x.s),v=>v>=4?UP_A:(v>=2?NEU_A:DOWN_A));
+
+// ===== B. T001 IC =====
+const t001=[
+  {p:'pool 1d',ic:-0.0328,ir:-0.150,po:0.426,p:0.000,sig:true},
+  {p:'pool 5d',ic:-0.0166,ir:-0.078,po:0.470,p:0.086,sig:false},
+  {p:'pool 20d',ic:-0.0215,ir:-0.115,po:0.474,p:0.026,sig:true},
+  {p:'single 1d',ic:-0.0337,ir:-0.155,po:0.430,p:0.000,sig:true},
+  {p:'single 5d',ic:-0.0182,ir:-0.086,po:0.458,p:0.070,sig:false},
+  {p:'single 20d',ic:-0.0222,ir:-0.118,po:0.466,p:0.024,sig:true},
+];
+const t001tb=document.querySelector('#t001tbl tbody');
+t001.forEach(x=>{
+  t001tb.innerHTML+=`<tr>
+    <td>${x.p}</td>
+    <td class="${cls0(x.ic)}">${fmt(x.ic,4)}</td>
+    <td class="${cls0(x.ir)}">${fmt(x.ir,3)}</td>
+    <td>${fmt(x.po,3)}</td>
+    <td>${fmt(x.p,3)}</td>
+    <td>${x.sig?'<span class="verdict pos-bg">显著</span>':'<span class="verdict" style="background:var(--neu-bg);color:var(--neutral)">不显著</span>'}</td></tr>`;
+});
+mkBar('t001ic','IC',t001.map(x=>x.p),t001.map(x=>x.ic),v=>v>0?UP_A:DOWN_A,{centerZero:true});
+
+// ===== C. 成本 =====
+mkBar('cost','总P&L',['raw','扣非后'],[30293,17258],v=>UP_A);
+
+// ===== D. T004 =====
+const t004=[
+  {c:'C5',n:'收阳C>O',pr:0.493,ic:-0.0221,sp:0.00564},
+  {c:'C1',n:'收盘站上MA5',pr:0.468,ic:-0.0232,sp:0.00457},
+  {c:'C4',n:'MA20>MA60',pr:0.508,ic:-0.0235,sp:0.00186},
+  {c:'C3',n:'MA10>MA20',pr:0.505,ic:-0.0287,sp:0.00164},
+  {c:'C7',n:'MA5角度≥45',pr:0.191,ic:-0.0414,sp:-0.00088},
+  {c:'C6',n:'低点≥MA5*0.98',pr:0.514,ic:-0.0186,sp:-0.00142},
+  {c:'C2',n:'MA5>MA10',pr:0.488,ic:-0.0522,sp:-0.00301},
+];
+const t004tb=document.querySelector('#t004tbl tbody');
+t004.forEach(x=>{
+  t004tb.innerHTML+=`<tr>
+    <td>${x.c}</td><td>${x.n}</td>
+    <td>${fmt(x.pr,3)}</td>
+    <td class="${cls0(x.ic)}">${fmt(x.ic,4)}</td>
+    <td class="${cls0(x.sp)}">${x.sp>0?'+':''}${(x.sp*100).toFixed(3)}%</td>
+    <td>${verdict(x.sp)}</td></tr>`;
+});
+mkBar('t004sp','spread(%)',t004.map(x=>x.c),t004.map(x=>x.sp*100),v=>v>0?UP_A:DOWN_A,{centerZero:true});
+
+// ===== E. T005 =====
+const t005=[
+  {f:'F1 突破60日新高',pr:0.060,inc:-0.00045,rec:'不加'},
+  {f:'F2 均线多头',pr:0.210,inc:0,rec:'中性(冗余)'},
+  {f:'F3 5日涨<20%防追高',pr:0.978,inc:-0.00307,rec:'不加'},
+];
+const t005tb=document.querySelector('#t005tbl tbody');
+t005.forEach(x=>{
+  t005tb.innerHTML+=`<tr>
+    <td>${x.f}</td><td>${fmt(x.pr,3)}</td>
+    <td class="${cls0(x.inc)}">${x.inc>0?'+':''}${(x.inc*100).toFixed(3)}%</td>
+    <td>${x.inc>0.002?'<span class="verdict pos-bg">加入</span>':'<span class="verdict neg-bg">'+x.rec+'</span>'}</td></tr>`;
+});
+
+// ===== F. T008 =====
+const t008=[
+  {p:'ATR',ic:0.0197,corr:'macd(0.11)',el:true},
+  {p:'circ_mv',ic:-0.0199,corr:'breakout(0)',el:true},
+  {p:'fund_flow',ic:-0.0350,corr:'breakout(0.62)',el:true},
+];
+const t008tb=document.querySelector('#t008tbl tbody');
+t008.forEach(x=>{
+  t008tb.innerHTML+=`<tr>
+    <td>${x.p}</td>
+    <td class="${cls0(x.ic)}">${fmt(x.ic,4)}</td>
+    <td>${x.corr}</td>
+    <td>${x.el?'<span class="verdict neg-bg">淘汰</span>':'<span class="verdict pos-bg">保留</span>'}</td></tr>`;
+});
+
+// ===== Chart helper (A股红涨绿跌硬编码色值) =====
+function mkBar(id,title,labels,vals,colorFn,opt={}){
+  const ctx=document.getElementById(id);
+  if(!ctx)return;
+  const arr=Array.isArray(vals[0])?vals.map(v=>v[1]):vals;
+  const labs=Array.isArray(labels[0])?labels.map(v=>v[1]):labels;
+  const colors=arr.map(v=>typeof colorFn==='function'?colorFn(v):(Array.isArray(colorFn)?colorFn[arr.indexOf(v)]:colorFn));
+  const baseMin=opt.centerZero?Math.min(0,...arr):0;
+  new Chart(ctx,{
+    type:'bar',
+    data:{labels:labs,datasets:[{label:title,data:arr,backgroundColor:colors,borderColor:colors.map(c=>c.replace('.78','.1').replace('.6','.1')),borderWidth:1,maxBarThickness:48}]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.parsed.y.toFixed(4)}}},
+      scales:{
+        y:{min:baseMin*(baseMin<0?1.1:0),grid:{color:'#eee'},ticks:{font:{size:10}}},
+        x:{grid:{display:false},ticks:{font:{size:10}}}
+      }
+    }
+  });
+}
+</script>
+</body>
+</html>
