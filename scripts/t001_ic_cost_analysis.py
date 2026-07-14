@@ -16,6 +16,8 @@ import pandas as pd
 from core.scoring.dimension6plus2 import ScoreCalculator6Plus2
 
 OUT = 'F:/backtest_workspace/results'; os.makedirs(OUT, exist_ok=True)
+SCORING_MODE = 'single'  # 'pool'(score_pool, market_sentiment=0) 或 'single'(score_single, market_sentiment非零+pool_5d_returns截面stm, 复现报告口径)
+LOG_TAG = 'single' if SCORING_MODE == 'single' else 'pool'
 POOL_FILE = 'D:/QMT_POOL/selected.txt'
 ASTOCK = 'E:/astock/daily/stock_daily.parquet'
 TRADES_CSV = 'D:/QMT_STRATEGIES/data/backtest_6plus2_full_result.csv'
@@ -86,10 +88,21 @@ for ri, di in enumerate(rebal_idx):
         fwd_d[c] = {n: float(fwd_prices.iloc[n-1] / hist['close'].iloc[-1] - 1) for n in FWD_DAYS}
     if len(pool_dict) < 10: continue
     try:
-        res = scorer.score_pool(pool_dict)
+        if SCORING_MODE == 'single':
+            # score_single: 传 pool_5d_returns 做截面stm, market_sentiment真算非零(复现报告口径)
+            pool_5d = pd.Series({c: float(hist['close'].iloc[-1] / hist['close'].iloc[-6] - 1) if len(hist) >= 6 else np.nan for c, hist in pool_dict.items()}).dropna()
+            scores_s = {}
+            for c, dfc in pool_dict.items():
+                if c not in pool_5d.index:
+                    continue
+                rec = scorer.score_single(c, dfc, pool_5d_returns=pool_5d)
+                scores_s[c] = rec.get('score_total', 0.0)
+            s = pd.Series(scores_s)
+        else:
+            res = scorer.score_pool(pool_dict)
+            s = res['score_total']
     except Exception:
         continue
-    s = res['score_total']
     ch = [c for c in s.index if c in fwd_d]
     if len(ch) < 5: continue
     pairs.append({
@@ -177,7 +190,7 @@ results['cost_calibration'] = cost
 results['pool_size'] = len(pool)
 results['date_range'] = f'{all_dates[0].date()}~{all_dates[-1].date()}'
 results['n_perm'] = N_PERM
-with open(f'{OUT}/t001_ic_cost.json', 'w', encoding='utf-8') as f:
+with open(f'{OUT}/t001_ic_cost_{LOG_TAG}.json', 'w', encoding='utf-8') as f:
     json.dump(results, f, ensure_ascii=False, indent=2)
 log(f'\n=== DONE -> {OUT}/t001_ic_cost.json ===')
 log(json.dumps(results, ensure_ascii=False, indent=2))
