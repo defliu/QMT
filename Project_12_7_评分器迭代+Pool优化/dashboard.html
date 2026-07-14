@@ -140,6 +140,23 @@ C成本校准trades CSV已失效。结论需结合此性质判断。
   <div class="note">结论: 精简505(移C2/C6/C7)反而<b style="color:var(--down)">降-6.48pp</b>失败; 505各条件协同不可精简; 原版505最优(C1-C7)。505过滤本身有价值(+9.89pp vs无过滤)。</div>
 </div>
 
+<!-- 新方向验证 -->
+<div class="card">
+  <h2>H. 新方向验证(任务1/2/3) <span class="tag tag-real">真回测+IC</span></h2>
+
+  <h2 style="font-size:13px;border:none;margin-top:8px">任务1 大盘择时(248池2021-2026, MA多头择时)</h2>
+  <table id="t011tbl"><thead><tr><th>组</th><th>累计</th><th>回撤</th><th>夏普</th></tr></thead><tbody></tbody></table>
+  <div class="note">ge60选股全周期跑输买入持有(42%vs299%,回撤-61%熊市风险); 择时对买入持有有效(buyhold_timing夏普1.461最高); <b>方向:弃评分器选股改择时+买入持有pool</b></div>
+
+  <h2 style="font-size:13px;border:none;margin-top:12px">任务2 正交新维度(248池全周期, IC+与P0共线性)</h2>
+  <table id="t010tbl"><thead><tr><th>维度</th><th>IC</th><th>牛IC</th><th>max共线</th><th>判定</th></tr></thead><tbody></tbody></table>
+  <div class="note">atr_pct(波动率)唯一正交+正IC(+0.0207,共线0.021); PE/PB/换手率/市值全负IC(正交但负)</div>
+
+  <h2 style="font-size:13px;border:none;margin-top:12px">任务3 成本校准补数据(内嵌sum-pnl, 修trades覆盖)</h2>
+  <table id="t012tbl"><thead><tr><th>变体</th><th>raw</th><th>扣非</th><th>拖累</th><th>夏普raw->cost</th></tr></thead><tbody></tbody></table>
+  <div class="note">top/ge60/ge70独立trades CSV已存(修覆盖); 扣非后ge70最优(24.18%/夏普3.58); ge60/ge70扣非后仍击败top</div>
+</div>
+
 <!-- 结论 -->
 <div class="card">
   <h2>🎯 统一结论</h2>
@@ -152,8 +169,12 @@ C成本校准trades CSV已失效。结论需结合此性质判断。
     <div class="kpi-item">P3<b class="neg">全淘汰</b></div>
     <div class="kpi-item">精简505<b class="neg">失败-6.48pp</b></div>
     <div class="kpi-item">原版505<b class="pos">最优不可动</b></div>
+    <div class="kpi-item">评分器选股<b class="neg">跑输大盘</b>(42%vs299%)</div>
+    <div class="kpi-item">择时+买入持有<b class="pos">最优</b>(夏普1.461)</div>
+    <div class="kpi-item">atr_pct<b class="pos">正交+正IC</b>(+0.0207)</div>
+    <div class="kpi-item">ge70扣非<b class="pos">最优</b>(24.18%)</div>
   </div>
-  <div class="note">6+2评分器非稳健截面预测器(全周期IC负),作≥60过滤器牛市可保留(击败TopN)但需大盘择时避熊; alpha主要在pool(505的C1收盘站上MA5+C5收阳); 505优化方向是精简(移C2负/C6/C7冗余)非叠加主升浪规则。</div>
+  <div class="note">6+2评分器非稳健截面预测器(全周期IC负),作≥60过滤器牛市可保留(击败TopN)但需大盘择时避熊; alpha主要在pool(505的C1收盘站上MA5+C5收阳); 505优化方向是精简(移C2负/C6/C7冗余)非叠加主升浪规则。<br><b>新方向(任务1/2/3):</b> 评分器选股全周期跑输买入持有pool(42%vs299%,熊市回撤-61%); 择时+买入持有最优(夏普1.461); atr_pct(波动率)是唯一正交+正IC新维度(+0.0207); 扣非成本后ge70最优(24.18%/夏普3.58)。→ <b>最终建议: 弃评分器选股, 改"大盘择时+买入持有pool", 可选加atr_pct正交维度</b>。</div>
 </div>
 
 <div class="footer">
@@ -285,6 +306,43 @@ t009.forEach(x=>{
     <td>${vs}</td></tr>`;
 });
 mkBar('t009ret','累计收益(%)',t009.map(x=>x.g),t009.map(x=>x.r),v=>v>=25?UP_A:(v>=20?NEU_A:DOWN_A));
+
+// ===== H. 任务1/2/3 新方向 =====
+const t011=[
+  {g:'full_ge60(选股)',r:42.48,d:-61.38,s:0.517},
+  {g:'timing_ge60(择时选股)',r:17.07,d:-42.60,s:0.345},
+  {g:'buyhold_full(买入持有)',r:299.64,d:-40.32,s:1.415,best:true},
+  {g:'buyhold_timing(择时持有)',r:129.71,d:-25.51,s:1.461,best2:true},
+];
+const t011tb=document.querySelector('#t011tbl tbody');
+t011.forEach(x=>{
+  const tag=x.best?'<span class="verdict pos-bg">收益最高</span>':(x.best2?'<span class="verdict pos-bg">夏普最高</span>':'');
+  t011tb.innerHTML+=`<tr><td>${x.g}</td><td class="${cls(x.r)}">+${fmt(x.r)}%</td><td class="${x.d<-50?'neg':'neu'}">${fmt(x.d)}%</td><td class="${x.s>=1.4?'pos':'neg'}">${fmt(x.s,3)}</td><td>${tag}</td></tr>`;
+});
+
+const t010=[
+  {d:'atr_pct(波动率)',ic:0.0207,bull:0.028,corr:'consolidation(0.02)',v:'正交+正IC✅'},
+  {d:'pe_ttm',ic:-0.026,bull:-0.023,corr:'sector(-0.04)',v:'正交但负'},
+  {d:'pb',ic:-0.040,bull:-0.030,corr:'sector(-0.03)',v:'正交但负'},
+  {d:'ps_ttm',ic:-0.027,bull:-0.027,corr:'stm(0.01)',v:'正交但负'},
+  {d:'dv_ttm',ic:-0.007,bull:0.006,corr:'sector(0.02)',v:'弱'},
+  {d:'turnover_rate',ic:-0.070,bull:-0.046,corr:'volprice(-0.24)',v:'正交但负'},
+  {d:'total_mv',ic:-0.045,bull:-0.051,corr:'sector(-0.09)',v:'正交但负'},
+];
+const t010tb=document.querySelector('#t010tbl tbody');
+t010.forEach(x=>{
+  t010tb.innerHTML+=`<tr><td>${x.d}</td><td class="${cls0(x.ic)}">${fmt(x.ic,4)}</td><td class="${cls0(x.bull)}">${fmt(x.bull,4)}</td><td>${x.corr}</td><td>${x.v.includes('✅')?'<span class="verdict pos-bg">'+x.v+'</span>':'<span class="verdict neg-bg">'+x.v+'</span>'}</td></tr>`;
+});
+
+const t012=[
+  {v:'top',raw:30.82,cost:18.49,drag:12.33,sr:3.79,sc:2.77},
+  {v:'ge-60',raw:35.41,cost:22.01,drag:13.40,sr:3.51,sc:2.80},
+  {v:'ge-70',raw:33.01,cost:24.18,drag:8.83,sr:4.48,sc:3.58,best:true},
+];
+const t012tb=document.querySelector('#t012tbl tbody');
+t012.forEach(x=>{
+  t012tb.innerHTML+=`<tr><td>${x.v}</td><td class="pos">+${fmt(x.raw)}%</td><td class="pos">+${fmt(x.cost)}%</td><td class="neg">-${fmt(x.drag)}pp</td><td>${fmt(x.sr,2)}-><span class="${x.sc>=3?'pos':'neg'}">${fmt(x.sc,2)}</span></td>${x.best?'<span class="verdict pos-bg">扣非最优</span>':''}</tr>`;
+});
 
 // ===== Chart helper (A股红涨绿跌硬编码色值) =====
 function mkBar(id,title,labels,vals,colorFn,opt={}){
