@@ -237,7 +237,6 @@ _g_my_codes = {}
 _g_cumulative_pnl = 0.0
 _g_last_date = ''
 _g_today_done = False
-_g_exported_today = False
 _g_phase_printed = set()
 _g_data_loaded = False
 _g_wait_printed = False
@@ -2078,8 +2077,6 @@ def _log_phase(now):
         key, desc = '1000', '买入窗口10:00-10:10'
     elif '1458' <= now < '1500':
         key, desc = '1458', '收盘序列'
-    elif '1500' <= now < '1505':
-        key, desc = '1500', '收盘帧导出'
     if key and key not in _g_phase_printed:
         _g_phase_printed.add(key)
         print("  [时段] %s %s" % (key, desc))
@@ -3767,7 +3764,6 @@ class StrategyRunner(object):
         global _g_pending_buys, _g_retry_queue, _g_candidate_queue, _g_per_stock_amount
         global _g_pending_sells, _g_pending_limitdown_sells, _g_sell_engine
         global _g_strategy_start_ts
-        global _g_exported_today
 
         if _g_init_done:
             return
@@ -3847,7 +3843,7 @@ class StrategyRunner(object):
         global _g_pending_buys, _g_retry_queue, _g_candidate_queue, _g_per_stock_amount
         global _g_pending_sells, _g_pending_limitdown_sells, _g_sell_engine
         global _g_op_executed, _g_startup_done, _g_all_data, _g_index_data, _g_last_sell_fingerprint
-        global _g_timegate_skip_printed, _g_cooling_printed, _g_exported_today
+        global _g_timegate_skip_printed, _g_cooling_printed
         global _g_premarket_check_done, _g_premarket_orders
         global _g_phase_printed
 
@@ -3859,7 +3855,6 @@ class StrategyRunner(object):
         if today != _g_last_date:
             _g_last_date = today
             _g_today_done = False
-            _g_exported_today = False
             _g_data_loaded = False
             _g_wait_printed = False
             _g_sell_skip_printed.clear()
