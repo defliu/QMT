@@ -28,7 +28,7 @@ from core.signal_main_rise import REQUIRED_BARS, MIN_BARS
 from core.signal_main_rise import MARKET_INDEX_CODE, MARKET_MA20, MARKET_MA60
 from core.signal_main_rise import SECTOR_HOT_TOP_N
 from core.risk_manager import Action, SellDecision, SellPositionState, SellStrategyEngine, get_trade_state_reason, format_plan_b_diagnosis
-from core.risk_manager import REGIME_BULL, REGIME_NEUTRAL, REGIME_BEAR, REGIME_CRASH
+from core.risk_manager import REGIME_BULL, REGIME_NEUTRAL, REGIME_BEAR, REGIME_CRASH, REGIME_POSITION_MULT
 from core.risk_manager import merge_positions_data, SOURCE_TAG_MANUAL, SOURCE_TAG_DEFAULT
 
 
@@ -163,6 +163,7 @@ STRATEGY_VERSION = 'v2026.07.13-risk_engine_strategy_exit'
 
 STRATEGY_CAPITAL = float(_strategy_config.get('capital_base', 100000))
 MAX_HOLD = int(_strategy_config.get('max_hold', 3))
+ENABLE_MA60_TIMING = _strategy_config.get('enable_ma60_timing', False)  # S004: MA60大盘择时仓位控制(T011验证), 默认关闭
 TARGET_RATIO = float(_strategy_config.get('target_ratio', 0.30))
 MAX_TOTAL_RATIO = 0.90
 FIXED_AMOUNT_PER_STOCK = 30000
@@ -360,6 +361,11 @@ class Trader:
             _safemode_log_trade_blocked(stock_code, 'buy', volume, price, remark, 'buy')
             from datetime import datetime as _dt
             return "safemode_" + _dt.now().strftime('%Y%m%d%H%M%S%f')
+        # S004: MA60大盘择时仓位控制(T011验证, 现有regime+REGIME_POSITION_MULT复用)
+        if ENABLE_MA60_TIMING and _g_market_regime in (REGIME_BEAR, REGIME_CRASH):
+            _mult = REGIME_POSITION_MULT.get(_g_market_regime, 1.0)
+            volume = int(volume * _mult)
+            print("[S004择时] %s regime=%s 仓位x%.1f -> vol=%d" % (stock_code, _g_market_regime, _mult, volume))
         vol = (volume // 100) * 100
         if _is_star_market_stock(stock_code) and vol < 200:
             print("[交易] 买入 %s 科创板最低200股，算出%d股不足，跳过不买（避免废单）" % (stock_code, vol))
