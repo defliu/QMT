@@ -1,5 +1,6 @@
 # coding=utf-8
 # 基线版本: CLEAN_BASELINE_V2 | 日期: 2026-07-14 | P3维度已从总分计算中完全移除
+# [FROZEN] BASELINE_V2 | 兜底基线(评分器IC负仅兜底不主动用,T001/T011证) | 冻结commit 531c7cb | 改动需诚哥审批 | Project13-S002
 """6+2 Fused Scoring Module — DEEPSEEK 6-dimension breakout framework
    + ShortTermMomentum + Sector Heat + MarketSentiment (pure pandas/numpy, zero QMT dependency).
 
