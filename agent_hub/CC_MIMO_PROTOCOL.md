@@ -171,7 +171,7 @@ Get-Content -Path D:\QMT_STRATEGIES\agent_hub\.mimo_live.log -Wait -Tail 50 -Enc
 2. **MIMO 偶尔声称切换模型实际未切** —— 历史教训，回执里要带 `MIMO 模型` 字段供 CC 抽查
 3. **MIMO 偶尔声称完成实际未完成** —— V1.1 阶段出过两次，CC 必须独立用 Read/git status 验
 4. **没有重试机制** —— mimo run 失败需 CC 手动判断重发还是改工单
-5. **远程仓库未配置** —— git push 类工单当前不可执行（云盘已备份，暂无需求）
+5. **远程仓库已配置**(0715) —— origin=git@github.com:defliu/QMT.git(私有,main分支), SSH密钥 ~/.ssh/id_ed25519(公钥已加GitHub)。git push 类工单可执行。首次push 0715含commit 42cd130(反查修复)+0740af1(协议)。注:历史含模拟账号67014907(私有仓库可接受);如改公开需先清理
 6. **MIMO 偶尔漏 commit 步骤** -- 0715 反查工单做到 validate 6/6 PASS 就停，没 commit（工单 commit 写在严禁段仍漏）。根因：回执自检原写"无其它 git 操作"，MIMO 倾向解读为"别 commit"。对策：回执自检已加"若工单授权 commit"显式项（§二.三），CC 验收独立查 git log 不信回执（§五.3）
 
 ## 九、2026-06-26 派单失败诊断记录
