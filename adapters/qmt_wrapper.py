@@ -164,6 +164,7 @@ STRATEGY_VERSION = 'v2026.07.13-risk_engine_strategy_exit'
 STRATEGY_CAPITAL = float(_strategy_config.get('capital_base', 100000))
 MAX_HOLD = int(_strategy_config.get('max_hold', 3))
 ENABLE_MA60_TIMING = _strategy_config.get('enable_ma60_timing', False)  # S004: MA60大盘择时仓位控制(T011验证), 默认关闭
+ENABLE_HOLD_POOL_MAINLINE = _strategy_config.get('enable_hold_pool_mainline', False)  # S010: MA60择时+买入持有505pool主线, 默认关闭
 TARGET_RATIO = float(_strategy_config.get('target_ratio', 0.30))
 MAX_TOTAL_RATIO = 0.90
 FIXED_AMOUNT_PER_STOCK = 30000
@@ -1331,6 +1332,85 @@ def _update_market_regime():
 # ============================================================
 #  选股 & 打分
 # ============================================================
+
+def _run_hold_pool_selection(C):
+    """S010主线: 505条件命中等权持有候选(替check_buy+评分排序).
+    内联505的C1-C7条件(不依赖whitebox_pool模块, 避免build拼接问题).
+    返回候选列表(等权, 不评分排序, 持满max_hold). 择时由trader.buy的S004处理."""
+    import math
+    result = []
+    pool_codes = []
+    if os.path.exists(POOL_PATH):
+        with open(POOL_PATH, 'r', encoding='gbk') as f:
+            for line in f:
+                std_code = _parse_pool_line(line)
+                if std_code:
+                    pool_codes.append(std_code)
+    held = set(_g_my_codes.keys()) if isinstance(_g_my_codes, dict) else set()
+    for code in pool_codes:
+        if code in held:
+            continue
+        df = _g_all_data.get(code)
+        if df is None or len(df) < 60:
+            continue
+        try:
+            hist = df.tail(120) if hasattr(df, 'tail') else df
+            c = hist['close']; h = hist['high']; l = hist['low']; o = hist['open']
+            from core.utils import ma, safe_last
+            ma5 = float(ma(c, 5).iloc[-1]); ma10 = float(ma(c, 10).iloc[-1])
+            ma20 = float(ma(c, 20).iloc[-1]); ma60 = float(ma(c, 60).iloc[-1])
+            cl = float(c.iloc[-1]); op = float(o.iloc[-1]); lo = float(l.iloc[-1])
+            # C1: close>MA5, C2: MA5>MA10, C3: MA10>MA20, C4: MA20>MA60
+            # C5: close>open, C6: low>=MA5*0.98, C7: MA5角度>=45
+            c1 = cl > ma5
+            c2 = ma5 > ma10
+            c3 = ma10 > ma20
+            c4 = ma20 > ma60
+            c5 = cl > op
+            c6 = lo >= ma5 * 0.98
+            ma5_prev = float(ma(c, 5).iloc[-2]) if len(c) >= 6 else ma5
+            angle = math.degrees(math.atan((ma5 / ma5_prev - 1) * 100)) if ma5_prev > 0 else 0
+            c7 = angle >= 45.0
+            if c1 and c2 and c3 and c4 and c5 and c6 and c7:
+                result.append({'code': code, 'signal': '505pool持有', 'buy_type': 'hold_pool'})
+        except Exception:
+            continue
+    slots = MAX_HOLD - len(held)
+    result = result[:slots]
+    print("  [S010持有pool] %d 只通过505条件(等权持有, 已排除持仓)" % len(result))
+    return result
+
+def _dual_run_monitor(C, hold_candidates):
+    """S005: QMT内部双跑监控 - 对比新主线(持有pool) vs v2基线(评分选股)选股.
+    偏差超阈值报警."""
+    try:
+        # v2基线选股(check_buy+评分)
+        v2_candidates = []
+        pool_codes = []
+        if os.path.exists(POOL_PATH):
+            with open(POOL_PATH, 'r', encoding='gbk') as f:
+                for line in f:
+                    std_code = _parse_pool_line(line)
+                    if std_code: pool_codes.append(std_code)
+        for code in pool_codes:
+            df = _g_all_data.get(code)
+            if df is None or len(df) < MIN_BARS: continue
+            try:
+                buy, signal, buy_type = check_buy(df)
+                if buy: v2_candidates.append(code)
+            except Exception: continue
+        new_codes = set(c['code'] for c in hold_candidates)
+        v2_codes = set(v2_candidates)
+        overlap = new_codes & v2_codes
+        union = new_codes | v2_codes
+        match_rate = len(overlap) / len(union) * 100 if union else 100
+        print("  [S005双跑] 新主线=%d只 v2基线=%d只 重合=%d 重合率=%.1f%%" % (len(new_codes), len(v2_codes), len(overlap), match_rate))
+        if match_rate < 95:
+            print("  [S005报警] 选股重合率<95%%!")
+        return {'new': len(new_codes), 'v2': len(v2_codes), 'overlap': len(overlap), 'match_rate': round(match_rate, 1)}
+    except Exception as e:
+        print("  [S005双跑] 异常: %s" % e)
+        return None
 
 def _score_display(d, key):
     """Format score dimension value as %.2f; keep string defaults (e.g. '--') unchanged."""
@@ -3922,7 +4002,15 @@ class StrategyRunner(object):
                 _g_data_loaded = True
 
             candidates = _load_pool()
-            if candidates and _g_all_data:
+            if ENABLE_HOLD_POOL_MAINLINE and _g_all_data:
+                # S010: 505条件命中等权持有(替check_buy信号+评分排序)
+                signal_candidates = _run_hold_pool_selection(C)
+                if signal_candidates:
+                    scored = [{'code': c['code'], 'score': 50.0, 'buy_points': 1, 'details': 'S010 505pool持有'} for c in signal_candidates]
+                    for s in scored:
+                        _safemode_log_signal(s['code'], s['score'], s.get('buy_points', 0), 0, details=s.get('details'))
+                    _dual_run_monitor(C, signal_candidates)
+            elif candidates and _g_all_data:
                 signal_candidates = []
                 for cand in candidates:
                     code = cand['code']

@@ -305,6 +305,9 @@ def main():
         'core/scoring/switch_scorer.py',    # 8D<->6+2 switch wrapper
         'core/risk_manager.py',
         'core/position_sizer.py',
+        'adapters/exit_adapters/base.py',   # 策略侧止盈适配层基类
+        'adapters/exit_adapters/trend_62.py',  # 趋势型6+2止盈适配器
+        'adapters/exit_adapters/__init__.py',  # 策略适配器注册入口
     ]
 
     # 仅在 --dev 模式下加入 MOCK
@@ -312,6 +315,7 @@ def main():
         SOURCE_FILES.append('adapters/context_mock.py')
 
     SOURCE_FILES.append('adapters/qmt_wrapper.py')
+    SOURCE_FILES.append('adapters/export_logger.py')  # 导出/日志函数（拆分自 qmt_wrapper）
 
     suffix = '_dev' if args.dev else '_main'
     if args.allday:
