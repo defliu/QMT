@@ -238,6 +238,7 @@ _g_cumulative_pnl = 0.0
 _g_last_date = ''
 _g_today_done = False
 _g_phase_printed = set()
+_g_last_heartbeat_min = -1
 _g_data_loaded = False
 _g_wait_printed = False
 _g_pending_buys = {}
@@ -274,11 +275,11 @@ _g_sell_fail_cooldown = {}         # {code: timestamp} 卖出失败60秒冷却
 
 # 卖出委托 passorder 后反查 order_id 的短轮询参数
 # QMT 异步分配 order_id 有 ~100ms 延迟，撞窗口内会查不到，轮询几次等它落地
-SELL_LOOKUP_RETRIES = 4       # 反查次数（含首次）
-SELL_LOOKUP_INTERVAL = 0.2    # 每次间隔秒（4次x0.2s=最多等 0.8s，覆盖 100ms 延迟有余）
+SELL_LOOKUP_RETRIES = 15      # 反查次数（含首次）, 15x0.2s=3s, BUG5: 待报单status=50变已报需时间, 原0.8s不够
+SELL_LOOKUP_INTERVAL = 0.2    # 每次间隔秒
 
 # 买入委托 passorder 后反查 order_id 的短轮询参数（同卖出）
-BUY_LOOKUP_RETRIES = 4
+BUY_LOOKUP_RETRIES = 15       # 15x0.2s=3s, 同卖出放宽
 BUY_LOOKUP_INTERVAL = 0.2
 
 # ============================================================
@@ -487,7 +488,9 @@ class Trader:
                     continue
 
                 vol = getattr(o, 'm_nOrderVolume', 0)
-                if vol != expected_vol:
+                # BUG5根因: 待报单status=50时m_nOrderVolume为空, 被 vol!=expected_vol 误continue
+                # 改: vol空/0时不continue, 继续走 code/direction/time/remark 校验(防误匹配他票)
+                if vol and vol != expected_vol:
                     continue
 
                 status = getattr(o, 'm_nOrderStatus', None)
@@ -527,7 +530,8 @@ class Trader:
                     try:
                         if _diag_write_header:
                             _diag_f.write(_diag_header + '\n')
-                        for _diag_o in orders[:5]:
+                        _diag_mine = [o for o in orders if ("%s.%s" % (getattr(o, 'm_strInstrumentID', ''), getattr(o, 'm_strExchangeID', '')) == stock_code)]
+                        for _diag_o in _diag_mine[:5]:
                             _diag_f.write(','.join([
                                 stock_code,
                                 str(getattr(_diag_o, 'm_nOrderID', '')),
@@ -2355,10 +2359,22 @@ def _normalize_sell_volume_for_board(code, desired_vol, available_vol, is_clear=
 
 def _check_and_execute_sell(C, today, allowed_layers=None):
     global _g_sell_engine, _g_pending_sells, _g_last_sell_fingerprint, _g_sell_skip_printed, _g_failed_printed
-    global _g_timegate_skip_printed
+    global _g_timegate_skip_printed, _g_last_heartbeat_min
 
     if _g_sell_engine is None:
         return []
+
+    # 心跳: 每5分钟打印卖出评估摘要, 让全天评估可观测(解决"只在10点"假象)
+    try:
+        _hb_dt = _get_qmt_time(C)
+        _hb_now = _hb_dt.strftime('%H%M')
+        _hb_min = int(_hb_now[:2]) * 60 + int(_hb_now[2:4])
+        if _hb_min - _g_last_heartbeat_min >= 5 or _g_last_heartbeat_min < 0:
+            _g_last_heartbeat_min = _hb_min
+            _hb_codes = ','.join(sorted(_g_my_codes.keys())) if _g_my_codes else ''
+            print("  [心跳] %s 卖出评估运行中 持仓%d只[%s]" % (_hb_now, len(_g_my_codes), _hb_codes))
+    except Exception:
+        pass  # 心跳不影响主流程
 
     # 补纳管：init 首帧通道未就绪可能漏纳，每轮卖出评估前再 sync 一次
     _sync_holdings_from_account(C, today)
@@ -3846,6 +3862,7 @@ class StrategyRunner(object):
         global _g_timegate_skip_printed, _g_cooling_printed
         global _g_premarket_check_done, _g_premarket_orders
         global _g_phase_printed
+        global _g_last_heartbeat_min
 
         dt = _get_qmt_time(C)
         today = dt.strftime('%Y%m%d')
@@ -3865,6 +3882,7 @@ class StrategyRunner(object):
             _g_timegate_skip_printed.clear()
             _g_cooling_printed = False
             _g_phase_printed.clear()
+            _g_last_heartbeat_min = -1
             _g_premarket_check_done = False
             _g_premarket_orders = {}
             if _g_sell_engine:
