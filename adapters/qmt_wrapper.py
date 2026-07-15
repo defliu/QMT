@@ -1380,7 +1380,12 @@ def _run_hold_pool_selection(C):
                     angle = math.degrees(math.atan((ma5 / ma5_prev - 1) * 100)) if ma5_prev > 0 else 0
                     c7 = angle >= 45.0
                     if c1 and c2 and c3 and c4 and c5 and c6 and c7:
-                        result.append({'code': code, 'signal': '505持有(QMT全市场)', 'buy_type': 'hold_pool'})
+                        # B+C: 5日涨幅<20%防追高(排除暴涨) + 记成交额排序
+                        ret_5d = (cl / c.iloc[-6] - 1) * 100 if len(c) >= 6 else 0
+                        if ret_5d >= 20.0:
+                            continue
+                        amt = float(df['amount'].tail(5).sum()) if 'amount' in df.columns else 0
+                        result.append({'code': code, 'signal': '505持有(QMT全市场)', 'buy_type': 'hold_pool', 'ret_5d': ret_5d, 'amount': amt})
                 except Exception:
                     continue
         except Exception as e:
@@ -1391,6 +1396,8 @@ def _run_hold_pool_selection(C):
     # 排除已持仓 + cap max_hold
     held = set(_g_my_codes.keys()) if isinstance(_g_my_codes, dict) else set()
     result = [r for r in result if r['code'] not in held]
+    # B+C: 按成交额排序选top max_hold(流动性优先)
+    result.sort(key=lambda r: r.get('amount', 0), reverse=True)
     result = result[:MAX_HOLD]
     # 缓存
     _g_hold_pool_cache = result
