@@ -81,7 +81,8 @@
 - [ ] 项 1
 - [ ] 项 2
 - [ ] 仅末尾追加，未改动上方
-- [ ] 无其它文件改动 / git 操作
+- [ ] 无工单外文件改动 / git 操作
+- [ ] 若工单授权 commit：已 `git commit` 且 `git status --short` 无残留（commit hash：<填>）
 ```
 ```
 
@@ -132,7 +133,9 @@ Get-Content -Path D:\QMT_STRATEGIES\agent_hub\.mimo_live.log -Wait -Tail 50 -Enc
 
 1. **读握手/产物文件**：用 Read 工具确认内容（行数、关键字段、时间戳真伪）
 2. **读工单回执段**：确认 MIMO 在工单末尾追加了回执，自检全 [x]
-3. **检查 git 干净度**（除非工单授权 git 操作）：`git status --short` 应只有工单/产物的预期改动
+3. **检查 git 干净度**：`git status --short` 看有无残留改动
+   - 工单**未授权** git：应无 git 改动（MIMO 擅自 commit/push 要揪出）
+   - 工单**授权** commit：`git log --oneline -1` 确认新 commit 落地 + hash 对得上 + working tree clean。**必须独立查 `git log`，不能信回执**（0715 反查工单 MIMO 做到 validate 6/6 PASS 就停，没 commit，回执也没勾 commit 项，CC 靠 `git status` 才发现）
 
 **验收通过** → 报告诚哥成果摘要 + 下一步建议
 **验收失败** → 诚实告诉诚哥哪一项没过，提议修正工单或重跑
@@ -169,6 +172,7 @@ Get-Content -Path D:\QMT_STRATEGIES\agent_hub\.mimo_live.log -Wait -Tail 50 -Enc
 3. **MIMO 偶尔声称完成实际未完成** —— V1.1 阶段出过两次，CC 必须独立用 Read/git status 验
 4. **没有重试机制** —— mimo run 失败需 CC 手动判断重发还是改工单
 5. **远程仓库未配置** —— git push 类工单当前不可执行（云盘已备份，暂无需求）
+6. **MIMO 偶尔漏 commit 步骤** -- 0715 反查工单做到 validate 6/6 PASS 就停，没 commit（工单 commit 写在严禁段仍漏）。根因：回执自检原写"无其它 git 操作"，MIMO 倾向解读为"别 commit"。对策：回执自检已加"若工单授权 commit"显式项（§二.三），CC 验收独立查 git log 不信回执（§五.3）
 
 ## 九、2026-06-26 派单失败诊断记录
 
