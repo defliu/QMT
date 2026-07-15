@@ -30,7 +30,7 @@ from core.utils import calc_bias, calc_macd, ma, safe_last
 class ScoreCalculator6Plus2:
     """6+2 fused scorer. Pure calculation — no QMT/xtquant dependency."""
 
-    def __init__(self, sector_heat_path="D:/QMT_POOL/sector_heat.json", enable_p3_dims=False):
+    def __init__(self, sector_heat_path="D:/QMT_POOL/sector_heat.json", enable_p3_dims=True):
         self._heat_map = {}
         self.enable_p3_dims = enable_p3_dims  # CLEAN_BASELINE_V2: P3 开关 (默认 off)
         self._load_sector_heat(sector_heat_path)

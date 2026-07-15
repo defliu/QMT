@@ -163,8 +163,8 @@ STRATEGY_VERSION = 'v2026.07.13-risk_engine_strategy_exit'
 
 STRATEGY_CAPITAL = float(_strategy_config.get('capital_base', 100000))
 MAX_HOLD = int(_strategy_config.get('max_hold', 3))
-ENABLE_MA60_TIMING = _strategy_config.get('enable_ma60_timing', False)  # S004: MA60大盘择时仓位控制(T011验证), 默认关闭
-ENABLE_HOLD_POOL_MAINLINE = _strategy_config.get('enable_hold_pool_mainline', False)  # S010: MA60择时+买入持有505pool主线, 默认关闭
+ENABLE_MA60_TIMING = _strategy_config.get('enable_ma60_timing', True)  # S004: MA60大盘择时仓位控制(T011验证), 默认关闭
+ENABLE_HOLD_POOL_MAINLINE = _strategy_config.get('enable_hold_pool_mainline', True)  # S010: MA60择时+买入持有505pool主线, 默认关闭
 TARGET_RATIO = float(_strategy_config.get('target_ratio', 0.30))
 MAX_TOTAL_RATIO = 0.90
 FIXED_AMOUNT_PER_STOCK = 30000
