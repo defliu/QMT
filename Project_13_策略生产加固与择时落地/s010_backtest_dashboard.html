@@ -40,7 +40,8 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
 <div class="sub">505选股+B+C排序+505失效退出+MA60择时 · 近1年(2025-07~2026-06) · 248池 · 每5天rebal</div>
 
 <div class="kpi-row">
-<div class="kpi"><div class="kpi-label">累计收益</div><div class="kpi-val pos">+392.35%</div></div>
+<div class="kpi"><div class="kpi-label">v1收益(无sell engine)</div><div class="kpi-val pos">+392.35%</div></div>
+<div class="kpi"><div class="kpi-label">v2收益(含sell engine+成本)</div><div class="kpi-val pos">+15.08%</div></div>
 <div class="kpi"><div class="kpi-label">最大回撤</div><div class="kpi-val neg">-31.57%</div></div>
 <div class="kpi"><div class="kpi-label">夏普</div><div class="kpi-val pos">2.810</div></div>
 <div class="kpi"><div class="kpi-label">胜率</div><div class="kpi-val pos">54.1%</div></div>
@@ -75,7 +76,8 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
 <h2>收益对比(vs基准)</h2>
 <table>
 <tr><th>方案</th><th class="num">累计收益</th><th class="num">回撤</th><th class="num">夏普</th></tr>
-<tr><td><b>S010(505+退出+择时)</b></td><td class="num pos">+392.35%</td><td class="num neg">-31.57%</td><td class="num pos">2.810</td></tr>
+<tr><td><b>S010 v1(无sell engine无成本)</b></td><td class="num pos">+392.35%</td><td class="num neg">-31.57%</td><td class="num pos">2.810</td></tr>
+<tr><td><b>S010 v2(完整sell engine+成本)</b></td><td class="num pos">+15.08%</td><td class="num neg">-21.25%</td><td class="num neu">0.810</td></tr>
 <tr><td>T011 择时+持有(无505)</td><td class="num pos">+129.71%</td><td class="num neg">-25.51%</td><td class="num pos">1.461</td></tr>
 <tr><td>T011 评分器ge60选股</td><td class="num pos">+42.48%</td><td class="num neg">-61.38%</td><td class="num neg">0.517</td></tr>
 <tr><td>买入持有248等权</td><td class="num pos">+299.64%</td><td class="num neg">-40.32%</td><td class="num pos">1.415</td></tr>
@@ -87,8 +89,11 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
 <h2>交易构成(283笔)</h2>
 <table>
 <tr><th>交易类型</th><th class="num">笔数</th><th class="num">占比</th></tr>
-<tr><td><span class="tag tag-up">505持有买入</span></td><td class="num">144</td><td class="num">50.9%</td></tr>
-<tr><td><span class="tag tag-down">505失效退出</span></td><td class="num">139</td><td class="num">49.1%</td></tr>
+<tr><td><b>v2退出明细(106笔)</b></td><td class="num"></td><td class="num"></td></tr>
+<tr><td><span class="tag tag-down">止损(-8%)</span></td><td class="num">12</td><td class="num">11.3%</td></tr>
+<tr><td><span class="tag tag-up">止盈(+20%)</span></td><td class="num">14</td><td class="num">13.2%</td></tr>
+<tr><td><span class="tag tag-warn">移动止盈(-5%)</span></td><td class="num">50</td><td class="num">47.2%</td></tr>
+<tr><td><span class="tag tag-down">505失效退出</span></td><td class="num">30</td><td class="num">28.3%</td></tr>
 </table>
 <div class="chart-box"><canvas id="tradeChart"></canvas></div>
 </div>
@@ -152,8 +157,8 @@ const UP='#e74c3c',DOWN='#27ae60',NEU='#95a5a6';
 new Chart(document.getElementById('cmpChart'),{
 type:'bar',
 data:{labels:['S010\n(505+退出+择时)','T011\n择时+持有','T011\n评分器ge60','买入持有\n248等权'],
-datasets:[{label:'累计收益%',data:[392.35,129.71,42.48,299.64],
-backgroundColor:['rgba(231,76,60,.8)','rgba(231,76,60,.5)','rgba(39,174,96,.5)','rgba(231,76,60,.4)'],
+datasets:[{label:'累计收益%',data:[392.35,15.08,129.71,299.64],
+backgroundColor:['rgba(231,76,60,.8)','rgba(243,156,18,.8)','rgba(231,76,60,.5)','rgba(231,76,60,.4)'],
 borderWidth:0,maxBarThickness:50}]},
 options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
 scales:{y:{ticks:{color:'#95a5a6',font:{size:10}},grid:{color:'#0f3460'}},
