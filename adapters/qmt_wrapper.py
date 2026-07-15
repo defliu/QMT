@@ -1333,51 +1333,69 @@ def _update_market_regime():
 #  选股 & 打分
 # ============================================================
 
+_g_hold_pool_cache = None
+_g_hold_pool_cache_date = None
+
 def _run_hold_pool_selection(C):
-    """S010主线: 505条件命中等权持有候选(替check_buy+评分排序).
-    内联505的C1-C7条件(不依赖whitebox_pool模块, 避免build拼接问题).
-    返回候选列表(等权, 不评分排序, 持满max_hold). 择时由trader.buy的S004处理."""
+    """S010主线: QMT全市场505条件(C1-C7)筛选, 等权持有.
+    不读selected.txt(不依赖通达信), 用C.get_stock_list_in_sector取全市场+get_market_data_ex取数据.
+    每日首次取全市场数据+判断(较慢~几分钟), 之后用缓存(快)."""
+    global _g_hold_pool_cache, _g_hold_pool_cache_date
     import math
+    from core.utils import ma, safe_last
+    from datetime import datetime as _dt
+    today_str = _dt.now().strftime('%Y%m%d')
+    # 缓存命中(每日只跑一次)
+    if _g_hold_pool_cache is not None and _g_hold_pool_cache_date == today_str:
+        print("  [S010] 505全市场缓存命中: %d 只" % len(_g_hold_pool_cache))
+        return _g_hold_pool_cache
+    # 取全市场代码
+    try:
+        all_codes = C.get_stock_list_in_sector('沪深A股')
+        codes = [c for c in all_codes if c.endswith('.SH') or c.endswith('.SZ')]
+        print("  [S010] QMT全市场: %d 只, 取数据+判断505条件..." % len(codes))
+    except Exception as e:
+        print("  [S010] get_stock_list_in_sector失败: %s" % e)
+        return []
+    # 批量取60天数据+判断C1-C7
     result = []
-    pool_codes = []
-    if os.path.exists(POOL_PATH):
-        with open(POOL_PATH, 'r', encoding='gbk') as f:
-            for line in f:
-                std_code = _parse_pool_line(line)
-                if std_code:
-                    pool_codes.append(std_code)
-    held = set(_g_my_codes.keys()) if isinstance(_g_my_codes, dict) else set()
-    for code in pool_codes:
-        if code in held:
-            continue
-        df = _g_all_data.get(code)
-        if df is None or len(df) < 60:
-            continue
+    BATCH = 200
+    for i in range(0, len(codes), BATCH):
+        batch = codes[i:i + BATCH]
         try:
-            hist = df.tail(120) if hasattr(df, 'tail') else df
-            c = hist['close']; h = hist['high']; l = hist['low']; o = hist['open']
-            from core.utils import ma, safe_last
-            ma5 = float(ma(c, 5).iloc[-1]); ma10 = float(ma(c, 10).iloc[-1])
-            ma20 = float(ma(c, 20).iloc[-1]); ma60 = float(ma(c, 60).iloc[-1])
-            cl = float(c.iloc[-1]); op = float(o.iloc[-1]); lo = float(l.iloc[-1])
-            # C1: close>MA5, C2: MA5>MA10, C3: MA10>MA20, C4: MA20>MA60
-            # C5: close>open, C6: low>=MA5*0.98, C7: MA5角度>=45
-            c1 = cl > ma5
-            c2 = ma5 > ma10
-            c3 = ma10 > ma20
-            c4 = ma20 > ma60
-            c5 = cl > op
-            c6 = lo >= ma5 * 0.98
-            ma5_prev = float(ma(c, 5).iloc[-2]) if len(c) >= 6 else ma5
-            angle = math.degrees(math.atan((ma5 / ma5_prev - 1) * 100)) if ma5_prev > 0 else 0
-            c7 = angle >= 45.0
-            if c1 and c2 and c3 and c4 and c5 and c6 and c7:
-                result.append({'code': code, 'signal': '505pool持有', 'buy_type': 'hold_pool'})
-        except Exception:
+            data = C.get_market_data_ex(stock_code=batch, period='1d', count=60)
+            if not data:
+                continue
+            for code, df in data.items():
+                if df is None or len(df) < 60:
+                    continue
+                try:
+                    c = df['close']; o = df['open']; h = df['high']; l = df['low']
+                    ma5 = float(ma(c, 5).iloc[-1]); ma10 = float(ma(c, 10).iloc[-1])
+                    ma20 = float(ma(c, 20).iloc[-1]); ma60 = float(ma(c, 60).iloc[-1])
+                    cl = float(c.iloc[-1]); op = float(o.iloc[-1]); lo = float(l.iloc[-1])
+                    c1 = cl > ma5; c2 = ma5 > ma10; c3 = ma10 > ma20; c4 = ma20 > ma60
+                    c5 = cl > op; c6 = lo >= ma5 * 0.98
+                    ma5_prev = float(ma(c, 5).iloc[-2]) if len(c) >= 6 else ma5
+                    angle = math.degrees(math.atan((ma5 / ma5_prev - 1) * 100)) if ma5_prev > 0 else 0
+                    c7 = angle >= 45.0
+                    if c1 and c2 and c3 and c4 and c5 and c6 and c7:
+                        result.append({'code': code, 'signal': '505持有(QMT全市场)', 'buy_type': 'hold_pool'})
+                except Exception:
+                    continue
+        except Exception as e:
+            print("  [S010] 批次%d异常: %s" % (i, e))
             continue
-    slots = MAX_HOLD - len(held)
-    result = result[:slots]
-    print("  [S010持有pool] %d 只通过505条件(等权持有, 已排除持仓)" % len(result))
+        if (i // BATCH) % 5 == 0:
+            print("  [S010] 进度: %d/%d (通过%d)" % (min(i + BATCH, len(codes)), len(codes), len(result)))
+    # 排除已持仓 + cap max_hold
+    held = set(_g_my_codes.keys()) if isinstance(_g_my_codes, dict) else set()
+    result = [r for r in result if r['code'] not in held]
+    result = result[:MAX_HOLD]
+    # 缓存
+    _g_hold_pool_cache = result
+    _g_hold_pool_cache_date = today_str
+    print("  [S010] 全市场505筛选完成: %d 只通过(等权持有, 不依赖通达信)" % len(result))
     return result
 
 def _dual_run_monitor(C, hold_candidates):
