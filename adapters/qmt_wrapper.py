@@ -1405,6 +1405,40 @@ def _run_hold_pool_selection(C):
     print("  [S010] 全市场505筛选完成: %d 只通过(等权持有, 不依赖通达信)" % len(result))
     return result
 
+def _check_hold_pool_exit(C):
+    """S010配套: 505条件失效退出. 每日检查持仓是否还满足C1-C7, 不满足的标记卖出.
+    返回需卖出的code列表(供sell逻辑用)."""
+    import math
+    from core.utils import ma, safe_last
+    to_exit = []
+    if not isinstance(_g_my_codes, dict) or not _g_my_codes:
+        return to_exit
+    for code in list(_g_my_codes.keys()):
+        df = _g_all_data.get(code)
+        if df is None or len(df) < 60:
+            continue
+        try:
+            hist = df.tail(120) if hasattr(df, 'tail') else df
+            c = hist['close']; o = hist['open']; l = hist['low']
+            ma5 = float(ma(c, 5).iloc[-1]); ma10 = float(ma(c, 10).iloc[-1])
+            ma20 = float(ma(c, 20).iloc[-1]); ma60 = float(ma(c, 60).iloc[-1])
+            cl = float(c.iloc[-1]); op = float(o.iloc[-1]); lo = float(l.iloc[-1])
+            c1 = cl > ma5; c2 = ma5 > ma10; c3 = ma10 > ma20; c4 = ma20 > ma60
+            c5 = cl > op; c6 = lo >= ma5 * 0.98
+            ma5_prev = float(ma(c, 5).iloc[-2]) if len(c) >= 6 else ma5
+            angle = math.degrees(math.atan((ma5 / ma5_prev - 1) * 100)) if ma5_prev > 0 else 0
+            c7 = angle >= 45.0
+            if not (c1 and c2 and c3 and c4 and c5 and c6 and c7):
+                to_exit.append(code)
+                print("  [S010退出] %s 505条件失效(c1=%s c2=%s c3=%s c4=%s c5=%s c6=%s c7=%s)" % (
+                    code, c1, c2, c3, c4, c5, c6, c7))
+        except Exception as e:
+            print("  [S010退出] %s 检查异常: %s" % (code, e))
+    if to_exit:
+        print("  [S010退出] %d 只505条件失效, 标记卖出" % len(to_exit))
+    return to_exit
+
+
 def _dual_run_monitor(C, hold_candidates):
     """S005: QMT内部双跑监控 - 对比新主线(持有pool) vs v2基线(评分选股)选股.
     偏差超阈值报警."""
@@ -4028,8 +4062,9 @@ class StrategyRunner(object):
 
             candidates = _load_pool()
             if ENABLE_HOLD_POOL_MAINLINE and _g_all_data:
+                # S010配套: 先检查持仓505条件失效退出(腾仓位)
+                _s010_exit_codes = _check_hold_pool_exit(C)
                 # S010: 505条件命中等权持有(替check_buy信号+评分排序)
-                signal_candidates = _run_hold_pool_selection(C)
                 if signal_candidates:
                     scored = [{'code': c['code'], 'score': 50.0, 'buy_points': 1, 'details': 'S010 505pool持有'} for c in signal_candidates]
                     for s in scored:
