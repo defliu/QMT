@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>S010策略回测看板 - 505选股+失效退出+择时</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{--up:#e74c3c;--down:#27ae60;--neutral:#95a5a6;--warn:#f39c12;--bg:#1a1a2e;--card:#16213e;--text:#e0e0e0;--border:#0f3460;--accent:#e94560}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI','Microsoft YaHei',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;padding:20px}
+h1{font-size:22px;margin-bottom:4px;color:#fff}
+.sub{color:var(--neutral);font-size:13px;margin-bottom:16px}
+.kpi-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px 18px;min-width:120px;text-align:center}
+.kpi-label{font-size:11px;color:var(--neutral);text-transform:uppercase;letter-spacing:1px}
+.kpi-val{font-size:24px;font-weight:700;margin-top:4px}
+.pos{color:var(--up)}.neg{color:var(--down)}.neu{color:var(--neutral)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px}
+.card h2{font-size:14px;color:var(--neutral);margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)}
+th{color:var(--neutral);font-size:11px;text-transform:uppercase}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.chart-box{height:300px;margin-top:10px;position:relative}
+.flow{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px}
+.flow-box{display:inline-block;background:var(--bg);border:1px solid var(--accent);border-radius:6px;padding:8px 14px;margin:4px;font-size:13px;color:var(--accent)}
+.flow-arrow{display:inline-block;color:var(--neutral);margin:0 4px}
+.tag{font-size:10px;padding:2px 6px;border-radius:8px;font-weight:600}
+.tag-up{background:rgba(231,76,60,.15);color:var(--up)}
+.tag-down{background:rgba(39,174,96,.15);color:var(--down)}
+.tag-warn{background:rgba(243,156,18,.15);color:var(--warn)}
+.alert{background:rgba(243,156,18,.1);border-left:3px solid var(--warn);padding:10px 14px;border-radius:4px;margin-bottom:16px;font-size:12px;color:#f0c040}
+</style>
+</head>
+<body>
+
+<h1>S010策略回测看板</h1>
+<div class="sub">505选股+B+C排序+505失效退出+MA60择时 · 近1年(2025-07~2026-06) · 248池 · 每5天rebal</div>
+
+<div class="kpi-row">
+<div class="kpi"><div class="kpi-label">累计收益</div><div class="kpi-val pos">+392.35%</div></div>
+<div class="kpi"><div class="kpi-label">最大回撤</div><div class="kpi-val neg">-31.57%</div></div>
+<div class="kpi"><div class="kpi-label">夏普</div><div class="kpi-val pos">2.810</div></div>
+<div class="kpi"><div class="kpi-label">胜率</div><div class="kpi-val pos">54.1%</div></div>
+<div class="kpi"><div class="kpi-label">交易笔数</div><div class="kpi-val neu">283</div></div>
+<div class="kpi"><div class="kpi-label">505失效退出</div><div class="kpi-val pos">139<span style="font-size:14px">(49%)</span></div></div>
+<div class="kpi"><div class="kpi-label">多头占比</div><div class="kpi-val pos">66.0%</div></div>
+</div>
+
+<div class="alert">
+⚠️ <b>局限(诚实标注)</b>: ①248固定池幸存者偏差(偏正) ②2025-26牛市(beta高) ③无交易成本(未扣滑点/佣金/印花税) ④简化持有(5天rebal无sell engine) ⑤505失效退出每5天检查(非每日)
+</div>
+
+<div class="flow">
+<h2 style="font-size:13px;color:var(--neutral);border:none;margin-bottom:10px">选股+退出闭环</h2>
+<span class="flow-box">QMT全市场</span><span class="flow-arrow">→</span>
+<span class="flow-box">505 C1-C7筛选</span><span class="flow-arrow">→</span>
+<span class="flow-box">5日涨幅&lt;20%防追高(B)</span><span class="flow-arrow">→</span>
+<span class="flow-box">成交额排序top5(C)</span><span class="flow-arrow">→</span>
+<span class="flow-box">等权持有</span>
+<br><br>
+<span class="flow-box" style="border-color:var(--down);color:var(--down)">505条件失效退出</span>
+<span class="flow-arrow">←</span>
+<span class="flow-box" style="border-color:var(--down);color:var(--down)">每日检查持仓C1-C7</span>
+<span class="flow-arrow">←</span>
+<span class="flow-box" style="border-color:var(--down);color:var(--down)">不满足→卖出腾仓位</span>
+<span class="flow-arrow">↔</span>
+<span class="flow-box" style="border-color:var(--warn);color:var(--warn)">MA60择时(BEAR限30%)</span>
+</div>
+
+<div class="grid">
+<div class="card">
+<h2>收益对比(vs基准)</h2>
+<table>
+<tr><th>方案</th><th class="num">累计收益</th><th class="num">回撤</th><th class="num">夏普</th></tr>
+<tr><td><b>S010(505+退出+择时)</b></td><td class="num pos">+392.35%</td><td class="num neg">-31.57%</td><td class="num pos">2.810</td></tr>
+<tr><td>T011 择时+持有(无505)</td><td class="num pos">+129.71%</td><td class="num neg">-25.51%</td><td class="num pos">1.461</td></tr>
+<tr><td>T011 评分器ge60选股</td><td class="num pos">+42.48%</td><td class="num neg">-61.38%</td><td class="num neg">0.517</td></tr>
+<tr><td>买入持有248等权</td><td class="num pos">+299.64%</td><td class="num neg">-40.32%</td><td class="num pos">1.415</td></tr>
+</table>
+<div class="chart-box"><canvas id="cmpChart"></canvas></div>
+</div>
+
+<div class="card">
+<h2>交易构成(283笔)</h2>
+<table>
+<tr><th>交易类型</th><th class="num">笔数</th><th class="num">占比</th></tr>
+<tr><td><span class="tag tag-up">505持有买入</span></td><td class="num">144</td><td class="num">50.9%</td></tr>
+<tr><td><span class="tag tag-down">505失效退出</span></td><td class="num">139</td><td class="num">49.1%</td></tr>
+</table>
+<div class="chart-box"><canvas id="tradeChart"></canvas></div>
+</div>
+</div>
+
+<div class="grid">
+<div class="card">
+<h2>505条件(C1-C7)明细</h2>
+<table>
+<tr><th>条件</th><th>内容</th><th>筛选</th></tr>
+<tr><td>C1</td><td>收盘站上MA5</td><td><span class="tag tag-up">多头</span></td></tr>
+<tr><td>C2</td><td>MA5&gt;MA10</td><td><span class="tag tag-up">多头</span></td></tr>
+<tr><td>C3</td><td>MA10&gt;MA20</td><td><span class="tag tag-up">多头</span></td></tr>
+<tr><td>C4</td><td>MA20&gt;MA60</td><td><span class="tag tag-up">多头</span></td></tr>
+<tr><td>C5</td><td>收阳C&gt;O</td><td><span class="tag tag-up">阳线</span></td></tr>
+<tr><td>C6</td><td>低点≥MA5*0.98</td><td><span class="tag tag-up">近MA5</span></td></tr>
+<tr><td>C7</td><td>MA5角度≥45°</td><td><span class="tag tag-warn">陡峭</span></td></tr>
+</table>
+<div style="margin-top:8px;font-size:12px;color:var(--neutral)">
+全市场5447只 → C1-C7通过244只(4.5%) → 防追高<20% → 112只 → 成交额top5
+</div>
+</div>
+
+<div class="card">
+<h2>择时+退出效果</h2>
+<table>
+<tr><th>机制</th><th>效果</th></tr>
+<tr><td>MA60择时</td><td>多头66%满仓 / 空头34%限30%仓</td></tr>
+<tr><td>505失效退出</td><td>49%交易靠失效退出(不赖占仓位)</td></tr>
+<tr><td>B防追高</td><td>5日涨幅≥20%排除(不追暴涨)</td></tr>
+<tr><td>C成交额排序</td><td>流动性好的优先(好进出)</td></tr>
+</table>
+<div style="margin-top:8px;font-size:12px;color:var(--neutral)">
+回撤-31.57%偏高(择时未完全保护熊市), 需sell engine(止损-8%等)进一步降回撤
+</div>
+</div>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+<h2>策略完整流程</h2>
+<table>
+<tr><th>步骤</th><th>动作</th><th>开关</th><th>默认</th></tr>
+<tr><td>1</td><td>505条件失效退出(检查持仓C1-C7)</td><td>enable_hold_pool_mainline</td><td><span class="tag tag-up">ON</span></td></tr>
+<tr><td>2</td><td>505 C1-C7全市场筛选</td><td>enable_hold_pool_mainline</td><td><span class="tag tag-up">ON</span></td></tr>
+<tr><td>3</td><td>5日涨幅<20%防追高(B)</td><td>enable_hold_pool_mainline</td><td><span class="tag tag-up">ON</span></td></tr>
+<tr><td>4</td><td>成交额排序选top5(C)</td><td>enable_hold_pool_mainline</td><td><span class="tag tag-up">ON</span></td></tr>
+<tr><td>5</td><td>等权持有</td><td>enable_hold_pool_mainline</td><td><span class="tag tag-up">ON</span></td></tr>
+<tr><td>6</td><td>MA60择时(BEAR限30%/CRASH空仓)</td><td>enable_ma60_timing</td><td><span class="tag tag-up">ON</span></td></tr>
+<tr><td>7</td><td>sell engine(止损-8%/止盈/移动止盈)</td><td>始终</td><td><span class="tag tag-warn">生产</span></td></tr>
+<tr><td colspan="4" style="color:var(--neutral);font-size:12px">回退: 关enable_hold_pool_mainline+enable_ma60_timing → 回纯v2基线</td></tr>
+</table>
+</div>
+
+<div style="color:var(--neutral);font-size:11px;text-align:center;border-top:1px solid var(--border);padding-top:12px">
+S010策略回测 · 505选股+B+C排序+505失效退出+MA60择时 · 2025-07~2026-06 · 248池固定proxy · commit 5ae1c03
+</div>
+
+<script>
+const UP='#e74c3c',DOWN='#27ae60',NEU='#95a5a6';
+// 收益对比柱状图
+new Chart(document.getElementById('cmpChart'),{
+type:'bar',
+data:{labels:['S010\n(505+退出+择时)','T011\n择时+持有','T011\n评分器ge60','买入持有\n248等权'],
+datasets:[{label:'累计收益%',data:[392.35,129.71,42.48,299.64],
+backgroundColor:['rgba(231,76,60,.8)','rgba(231,76,60,.5)','rgba(39,174,96,.5)','rgba(231,76,60,.4)'],
+borderWidth:0,maxBarThickness:50}]},
+options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+scales:{y:{ticks:{color:'#95a5a6',font:{size:10}},grid:{color:'#0f3460'}},
+x:{ticks:{color:'#95a5a6',font:{size:9}},grid:{display:false}}}}});
+// 交易构成饼图
+new Chart(document.getElementById('tradeChart'),{
+type:'doughnut',
+data:{labels:['505持有买入(144)','505失效退出(139)'],
+datasets:[{data:[144,139],backgroundColor:['rgba(231,76,60,.7)','rgba(39,174,96,.7)'],borderWidth:0}]},
+options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#95a5a6',font:{size:11}}}}}});
+</script>
+</body>
+</html>
