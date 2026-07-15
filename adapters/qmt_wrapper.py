@@ -1374,18 +1374,12 @@ def _run_hold_pool_selection(C):
                     ma5 = float(ma(c, 5).iloc[-1]); ma10 = float(ma(c, 10).iloc[-1])
                     ma20 = float(ma(c, 20).iloc[-1]); ma60 = float(ma(c, 60).iloc[-1])
                     cl = float(c.iloc[-1]); op = float(o.iloc[-1]); lo = float(l.iloc[-1])
-                    c1 = cl > ma5; c2 = ma5 > ma10; c3 = ma10 > ma20; c4 = ma20 > ma60
-                    c5 = cl > op; c6 = lo >= ma5 * 0.98
-                    ma5_prev = float(ma(c, 5).iloc[-2]) if len(c) >= 6 else ma5
-                    angle = math.degrees(math.atan((ma5 / ma5_prev - 1) * 100)) if ma5_prev > 0 else 0
-                    c7 = angle >= 45.0
-                    if c1 and c2 and c3 and c4 and c5 and c6 and c7:
-                        # B+C: 5日涨幅<20%防追高(排除暴涨) + 记成交额排序
-                        ret_5d = (cl / c.iloc[-6] - 1) * 100 if len(c) >= 6 else 0
-                        if ret_5d >= 20.0:
-                            continue
+                    # 优化: top1000归因仅C3+C4有效正, C1/C2/C5/C6/C7负/中性已移除
+                    c3 = ma10 > ma20; c4 = ma20 > ma60
+                    if c3 and c4:
+                        # C: 成交额排序(B防追高已移除,归因r10中性)
                         amt = float(df['amount'].tail(5).sum()) if 'amount' in df.columns else 0
-                        result.append({'code': code, 'signal': '505持有(QMT全市场)', 'buy_type': 'hold_pool', 'ret_5d': ret_5d, 'amount': amt})
+                        result.append({'code': code, 'signal': 'C3C4持有(QMT全市场)', 'buy_type': 'hold_pool', 'amount': amt})
                 except Exception:
                     continue
         except Exception as e:
@@ -1423,12 +1417,9 @@ def _check_hold_pool_exit(C):
             ma5 = float(ma(c, 5).iloc[-1]); ma10 = float(ma(c, 10).iloc[-1])
             ma20 = float(ma(c, 20).iloc[-1]); ma60 = float(ma(c, 60).iloc[-1])
             cl = float(c.iloc[-1]); op = float(o.iloc[-1]); lo = float(l.iloc[-1])
-            c1 = cl > ma5; c2 = ma5 > ma10; c3 = ma10 > ma20; c4 = ma20 > ma60
-            c5 = cl > op; c6 = lo >= ma5 * 0.98
-            ma5_prev = float(ma(c, 5).iloc[-2]) if len(c) >= 6 else ma5
-            angle = math.degrees(math.atan((ma5 / ma5_prev - 1) * 100)) if ma5_prev > 0 else 0
-            c7 = angle >= 45.0
-            if not (c1 and c2 and c3 and c4 and c5 and c6 and c7):
+            # 优化: 仅检查C3+C4(归因有效正)
+            c3 = ma10 > ma20; c4 = ma20 > ma60
+            if not (c3 and c4):
                 to_exit.append(code)
                 print("  [S010退出] %s 505条件失效(c1=%s c2=%s c3=%s c4=%s c5=%s c6=%s c7=%s)" % (
                     code, c1, c2, c3, c4, c5, c6, c7))
