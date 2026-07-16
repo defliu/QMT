@@ -1335,6 +1335,7 @@ def _update_market_regime():
 
 _g_hold_pool_cache = None
 _g_hold_pool_cache_date = None
+_g_hold_pool_refreshed = False  # B方案: 14:50刷新缓存标志
 
 def _run_hold_pool_selection(C):
     """S010主线: QMT全市场505条件(C1-C7)筛选, 等权持有.
@@ -1345,10 +1346,22 @@ def _run_hold_pool_selection(C):
     from core.utils import ma, safe_last
     from datetime import datetime as _dt
     today_str = _dt.now().strftime('%Y%m%d')
-    # 缓存命中(每日只跑一次)
+    # 缓存命中(每日只跑一次, 但14:50买入窗口前强制刷新一次)
+    global _g_hold_pool_refreshed
+    try:
+        now_str = _get_qmt_time(C)
+    except Exception:
+        now_str = _dt.now().strftime('%H%M')
+    is_buy_window = '1450' <= now_str <= '1500'
     if _g_hold_pool_cache is not None and _g_hold_pool_cache_date == today_str:
-        print("  [S010] 505全市场缓存命中: %d 只" % len(_g_hold_pool_cache))
-        return _g_hold_pool_cache
+        if is_buy_window and not _g_hold_pool_refreshed:
+            # B方案: 14:50买入窗口前刷新缓存(用最新数据重跑)
+            print("  [S010] 14:50买入窗口刷新缓存(用最新数据)...")
+            _g_hold_pool_refreshed = True
+            # 继续往下跑(不return, 重跑全市场筛选)
+        else:
+            print("  [S010] 505全市场缓存命中: %d 只" % len(_g_hold_pool_cache))
+            return _g_hold_pool_cache
     # 取全市场代码
     try:
         all_codes = C.get_stock_list_in_sector('沪深A股')
@@ -1396,6 +1409,7 @@ def _run_hold_pool_selection(C):
     # 缓存
     _g_hold_pool_cache = result
     _g_hold_pool_cache_date = today_str
+    _g_hold_pool_refreshed = False  # 每日首次跑后重置刷新标志
     print("  [S010] 全市场505筛选完成: %d 只通过(等权持有, 不依赖通达信)" % len(result))
     return result
 
