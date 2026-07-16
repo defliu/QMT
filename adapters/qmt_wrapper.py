@@ -1028,18 +1028,23 @@ def _load_data(C, dt=None):
     global _g_stock_list, _g_all_data, _g_index_data, _g_scorer
 
     target_codes = []
-    if os.path.exists(POOL_PATH):
-        try:
-            with open(POOL_PATH, 'r', encoding='gbk') as f:
-                for line in f:
-                    std_code = _parse_pool_line(line)
-                    if std_code:
-                        target_codes.append(std_code)
-            print("  外部池: %s  -> %d 只目标股票" % (POOL_PATH, len(target_codes)))
-        except Exception as e:
-            print("  读取外部池失败: %s" % e)
+    if ENABLE_HOLD_POOL_MAINLINE:
+        all_codes = C.get_stock_list_in_sector('沪深A股')
+        target_codes = [c for c in all_codes if c.endswith('.SH') or c.endswith('.SZ')]
+        print("  [数据加载] QMT全市场模式: %d 只(不读selected.txt)" % len(target_codes))
     else:
-        print("  WARNING: 外部池文件不存在: %s" % POOL_PATH)
+        if os.path.exists(POOL_PATH):
+            try:
+                with open(POOL_PATH, 'r', encoding='gbk') as f:
+                    for line in f:
+                        std_code = _parse_pool_line(line)
+                        if std_code:
+                            target_codes.append(std_code)
+                print("  [数据加载] v2基线模式: %d 只(读selected.txt)" % len(target_codes))
+            except Exception as e:
+                print("  读取外部池失败: %s" % e)
+        else:
+            print("  WARNING: 外部池文件不存在: %s" % POOL_PATH)
 
     _g_stock_list = target_codes
 
