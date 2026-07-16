@@ -1411,6 +1411,13 @@ def _run_hold_pool_selection(C):
     _g_hold_pool_cache_date = today_str
     _g_hold_pool_refreshed = False  # 每日首次跑后重置刷新标志
     print("  [S010] 全市场505筛选完成: %d 只通过(等权持有, 不依赖通达信)" % len(result))
+    for r in result:
+        try:
+            name = _get_stock_name_safe(C, r['code'])
+        except Exception:
+            name = r['code']
+        amt_yi = r.get('amount', 0) / 1e8
+        print("    [S010选股] %s  %s  5日均成交额=%.2f亿" % (r['code'], name, amt_yi))
     return result
 
 def _check_hold_pool_exit(C):
