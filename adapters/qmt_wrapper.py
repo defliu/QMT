@@ -3309,6 +3309,10 @@ def _execute_trade(C, today, dt):
         print("  仓位已满，尝试换仓...")
 
     candidates = _load_pool()
+    if not candidates and ENABLE_HOLD_POOL_MAINLINE:
+        candidates = _run_hold_pool_selection(C)
+        if candidates:
+            print("  [S010] 全市场505筛选池: %d 只（替换外部池）" % len(candidates))
     if not candidates:
         print("  [外部池] 无候选股票")
         return False
@@ -4082,11 +4086,14 @@ class StrategyRunner(object):
                 _g_data_loaded = True
 
             candidates = _load_pool()
+            if not candidates and ENABLE_HOLD_POOL_MAINLINE:
+                candidates = _run_hold_pool_selection(C)
             if ENABLE_HOLD_POOL_MAINLINE and _g_all_data:
                 # S010配套: 先检查持仓505条件失效退出(腾仓位)
                 _s010_exit_codes = _check_hold_pool_exit(C)
                 # S010: 505条件命中等权持有(替check_buy信号+评分排序)
-                if signal_candidates:
+                if candidates:
+                    signal_candidates = [{'code': c['code'], 'signal': 'S010 505pool', 'buy_type': 'S010'} for c in candidates]
                     scored = [{'code': c['code'], 'score': 50.0, 'buy_points': 1, 'details': 'S010 505pool持有'} for c in signal_candidates]
                     for s in scored:
                         _safemode_log_signal(s['code'], s['score'], s.get('buy_points', 0), 0, details=s.get('details'))
