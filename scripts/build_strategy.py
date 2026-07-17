@@ -295,6 +295,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dev', action='store_true', help='构建开发版(含MOCK)')
     parser.add_argument('--allday', action='store_true', help='构建全天调试版(DEBUG_MODE硬编码True,不含MOCK)')
+    parser.add_argument('--test', action='store_true', help='构建后自动跑miniQMT测试(需本地QMT环境)')
     args = parser.parse_args()
 
     # 需要合并的源文件（按依赖顺序排列）
@@ -396,6 +397,71 @@ def main():
 
     print('Done.')
 
+    # 可选: 构建后自动跑 miniQMT 测试
+    if args.test:
+        _run_miniqmt_tests()
 
-if __name__ == '__main__':
-    main()
+
+def _run_miniqmt_tests():
+    """构建后自动跑 miniQMT 测试（需本地QMT环境）"""
+    QMT_PYTHON = r'E:\国金QMT交易端模拟\bin.x64\python.exe'
+    TEST_SCRIPTS = [
+        r'D:\QMT_STRATEGIES\scripts\qmt_test_01_data_path.py',
+        r'D:\QMT_STRATEGIES\scripts\qmt_test_02_strategy_components.py',
+        r'D:\QMT_STRATEGIES\scripts\qmt_test_03_full_flow.py',
+    ]
+
+    if not os.path.exists(QMT_PYTHON):
+        print('\n  [QMT测试] 跳过: 本地QMT Python未安装 (%s)' % QMT_PYTHON)
+        return
+
+    import subprocess
+    print('\n' + '=' * 50)
+    print('  运行 miniQMT 测试...')
+    print('=' * 50)
+
+    all_pass = True
+    for script in TEST_SCRIPTS:
+        if not os.path.exists(script):
+            print('\n  [QMT测试] 跳过: 测试脚本不存在 %s' % script)
+            continue
+        print('\n  --- %s ---' % os.path.basename(script))
+        try:
+            result = subprocess.run(
+                [QMT_PYTHON, script],
+                capture_output=True, timeout=120
+            )
+            # QMT Python 输出 GBK，用二进制读后转 UTF-8
+            stdout = result.stdout.decode('utf-8', errors='replace')
+            # 提取 JSON 结果
+            import json
+            if '---JSON-START---' in stdout:
+                json_str = stdout.split('---JSON-START---')[1].split('---JSON-END---')[0].strip()
+                data = json.loads(json_str)
+                status = data.get('status', 'FAIL')
+                summary = data.get('summary', '')
+                if status == 'PASS':
+                    print('  [PASS] %s' % summary)
+                else:
+                    print('  [FAIL] %s' % summary)
+                    all_pass = False
+                for d in data.get('details', []):
+                    mark = 'PASS' if d['status'] == 'PASS' else 'FAIL'
+                    print('    [%s] %s: %s' % (mark, d['name'], d['detail']))
+            else:
+                print(stdout[-500:] if len(stdout) > 500 else stdout)
+                if result.returncode != 0:
+                    all_pass = False
+        except subprocess.TimeoutExpired:
+            print('  [FAIL] 超时')
+            all_pass = False
+        except Exception as e:
+            print('  [FAIL] 异常: %s' % e)
+            all_pass = False
+
+    print('\n' + '=' * 50)
+    if all_pass:
+        print('  miniQMT 测试: ALL PASS')
+    else:
+        print('  miniQMT 测试: 有失败项，请检查上方日志')
+    print('=' * 50)
