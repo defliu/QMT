@@ -47,9 +47,10 @@ def compute_all_factors(panel, fin_ffill, date):
     # dividend_yield
     result["dividend_yield"] = date_series["dv_ratio"]
 
-    # ROE (从财务表取最近季度)
+    # ROE (从财务表取最近季度, 考虑财报披露滞后45天)
     fin_dates = fin_ffill.index
-    valid = fin_dates[fin_dates <= pd.Timestamp(date)]
+    lookup_date = pd.Timestamp(date) - pd.Timedelta(days=45)
+    valid = fin_dates[fin_dates <= lookup_date]
     if len(valid) > 0:
         roe = fin_ffill.loc[valid[-1], "roe"]
         gpm = fin_ffill.loc[valid[-1], "grossprofit_margin"]
@@ -59,39 +60,41 @@ def compute_all_factors(panel, fin_ffill, date):
     result["ROE"] = roe.reindex(date_series.index)
     result["grossprofit_margin"] = gpm.reindex(date_series.index)
 
-    # 动量
+    # 动量（排除当日：使用 date-1 的收盘价）
     date_idx = trade_dates.index(date)
+    prev_idx = max(0, date_idx - 1)
+    prev_date = trade_dates[prev_idx]
+    prev_close = panel.loc[prev_date, "close"]
     for name, w in [("momentum_1m", 20), ("momentum_3m", 60), ("momentum_6m", 120)]:
         if date_idx >= w:
             start = trade_dates[date_idx - w]
             start_close = panel.loc[start, "close"]
-            end_close = date_series["close"]
-            common = start_close.index.intersection(end_close.index)
-            ret = end_close[common] / start_close[common] - 1.0
+            common = prev_close.index.intersection(start_close.index)
+            ret = prev_close[common] / start_close[common] - 1.0
             result[name] = ret.reindex(date_series.index)
         else:
             result[name] = pd.Series(0.0, index=date_series.index)
 
-    # 换手率变化 (20d / 60d)
-    if date_idx >= 60:
-        s20 = panel.loc[trade_dates[date_idx - 20]:date, "turnover_rate"].groupby("ts_code").mean()
-        s60 = panel.loc[trade_dates[date_idx - 60]:date, "turnover_rate"].groupby("ts_code").mean()
+    # 换手率变化 (近20d均值 / 近60d均值, 排除当日)
+    if date_idx > 60:
+        s20 = panel.loc[trade_dates[date_idx - 20]:prev_date, "turnover_rate"].groupby("ts_code").mean()
+        s60 = panel.loc[trade_dates[date_idx - 60]:prev_date, "turnover_rate"].groupby("ts_code").mean()
         tc = s20 / s60.replace(0, np.nan) - 1.0
         result["turnover_change"] = tc.reindex(date_series.index)
     else:
         result["turnover_change"] = pd.Series(0.0, index=date_series.index)
 
-    # 波动率 (60d)
-    if date_idx >= 60:
-        pct = panel.loc[trade_dates[date_idx - 60]:date, "pct_chg"]
+    # 波动率 (60d, 排除当日)
+    if date_idx > 60:
+        pct = panel.loc[trade_dates[date_idx - 60]:prev_date, "pct_chg"]
         vol = pct.groupby("ts_code").std()
         result["volatility_60d"] = vol.reindex(date_series.index)
     else:
         result["volatility_60d"] = pd.Series(0.0, index=date_series.index)
 
-    # 流动性 (20d avg log amount)
-    if date_idx >= 20:
-        amt = panel.loc[trade_dates[date_idx - 20]:date, "amount"]
+    # 流动性 (20d avg log amount, 排除当日)
+    if date_idx > 20:
+        amt = panel.loc[trade_dates[date_idx - 20]:prev_date, "amount"]
         la = np.log(amt.groupby("ts_code").mean().replace(0, np.nan))
         result["liquidity_avg"] = la.reindex(date_series.index)
     else:

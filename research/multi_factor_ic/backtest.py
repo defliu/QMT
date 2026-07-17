@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
-from research.multi_factor_ic.data_loader import get_rebalance_dates, load_universe, build_panel
+from research.multi_factor_ic.data_loader import get_rebalance_dates, load_universe, build_panel, get_universe_at_date
 from research.multi_factor_ic.scoring import MultiFactorScorer
 from research.multi_factor_ic.ic_test import calc_forward_return
 from research.multi_factor_ic.config import OUTPUT_DIR
@@ -39,8 +39,14 @@ def _industry_cap(scores, industry_map, top_n, max_pct=0.25):
     return selected
 
 
+def _apply_tx_costs(returns, one_way_cost=0.002):
+    """扣除交易成本。monthly full-turnover: 买卖各一次。"""
+    return [r - 2.0 * one_way_cost for r in returns]
+
+
 def backtest(panel, fin_ffill, top_n=20, hold=1,
-             industry_map=None, max_industry_pct=0.25, freq="M"):
+             industry_map=None, max_industry_pct=0.25, freq="M",
+             tx_cost=0.002, dynamic_universe=True):
     """运行调仓回测。
 
     Args:
@@ -51,6 +57,8 @@ def backtest(panel, fin_ffill, top_n=20, hold=1,
         industry_map: 行业映射，None=不做行业中性化
         max_industry_pct: 单行业最大占比
         freq: 调仓频率 "M"=月 "2M"=双月 "Q"=季度
+        tx_cost: 单边交易成本(佣金+印花税+滑点)，默认0.2%
+        dynamic_universe: 是否使用动态滚动universe（消除生存偏差）
 
     Returns:
         equity_df, trades_df, metrics
@@ -70,6 +78,9 @@ def backtest(panel, fin_ffill, top_n=20, hold=1,
     equity_curve = []
     trades_records = []
 
+    if dynamic_universe:
+        print("[backtest] 使用动态滚动universe")
+
     for i, rebal_date in enumerate(rebalance_dates):
         try:
             scores = scorer.score(panel, fin_ffill, rebal_date)
@@ -77,25 +88,35 @@ def backtest(panel, fin_ffill, top_n=20, hold=1,
             print(f"  [skip] {rebal_date}: {e}")
             continue
 
+        if dynamic_universe:
+            universe_at_date = get_universe_at_date(panel, rebal_date)
+            scores = scores[scores.index.isin(universe_at_date)]
+
         if len(scores.dropna()) < top_n:
             print(f"  [skip] {rebal_date}: 评分不足 {top_n}")
             continue
 
-        # 选股：行业中性化 or 直接取 TOP
         if industry_map is not None:
             top_stocks = _industry_cap(scores, industry_map, top_n, max_industry_pct)
         else:
             top_stocks = scores.dropna().sort_values(ascending=False).head(top_n).index.tolist()
 
-        # 计算持有期收益
+        # 次日收盘价成交：评分日在 rebal_date（月末收盘后），买入在次日开盘后收盘价
+        rebal_idx = trade_dates.index(rebal_date)
+        if rebal_idx + 1 >= len(trade_dates):
+            continue
+        entry_date = trade_dates[rebal_idx + 1]
+
         for h in range(hold):
             hold_idx = i + h
             if hold_idx >= len(rebalance_dates) - 1:
                 break
-            entry_date = rebal_date
-            exit_date = rebalance_dates[hold_idx + 1]
+            next_rebal = rebalance_dates[hold_idx + 1]
+            exit_idx = trade_dates.index(next_rebal)
+            if exit_idx + 1 >= len(trade_dates):
+                continue
+            exit_date = trade_dates[exit_idx + 1]
 
-            # 计算每只股票的收益
             stock_returns = []
             held_stocks = []
             for code in top_stocks:
@@ -114,8 +135,8 @@ def backtest(panel, fin_ffill, top_n=20, hold=1,
             if len(stock_returns) == 0:
                 continue
 
-            # 等权组合收益
             portfolio_ret = np.mean(stock_returns)
+            portfolio_ret -= 2.0 * tx_cost
             portfolio_value *= (1 + portfolio_ret)
 
             equity_curve.append({
@@ -143,7 +164,7 @@ def backtest(panel, fin_ffill, top_n=20, hold=1,
 
 
 def _calc_metrics(equity_df, trades_df, panel):
-    """计算绩效指标。"""
+    """计算绩效指标（基于实际日历时间年化，适配任意调仓频率）。"""
     metrics = {}
 
     if len(equity_df) == 0:
@@ -151,24 +172,26 @@ def _calc_metrics(equity_df, trades_df, panel):
 
     total_return = equity_df["portfolio_value"].iloc[-1] - 1.0
 
-    # 年化收益（按实际交易日推算年化）
-    n_periods = len(equity_df)
-    years = n_periods / 12  # 月度调仓
-    if years > 0:
-        ann_return = (1 + total_return) ** (1 / years) - 1
-    else:
-        ann_return = 0
+    # 实际年数
+    first_date = pd.Timestamp(equity_df["date"].iloc[0])
+    last_date = pd.Timestamp(equity_df["date"].iloc[-1])
+    years = (last_date - first_date).days / 365.25
+    years = max(years, 1 / 12)
+
+    # 年化收益
+    ann_return = (1 + total_return) ** (1 / years) - 1
 
     # 最大回撤
     cummax = equity_df["portfolio_value"].cummax()
     drawdown = equity_df["portfolio_value"] / cummax - 1
     max_dd = drawdown.min()
 
-    # 夏普比率（假设无风险利率 2.5%）
-    rf = 0.025 / 12  # 月度无风险利率
-    excess_returns = equity_df["period_return"] - rf
-    if excess_returns.std() > 0:
-        sharpe = np.sqrt(12) * excess_returns.mean() / excess_returns.std()
+    # 每期收益率 → 年化夏普
+    periods_per_year = len(equity_df) / years
+    rf_per_period = 0.025 / periods_per_year  # 无风险利率2.5%年化
+    excess_returns = equity_df["period_return"] - rf_per_period
+    if excess_returns.std() > 0 and excess_returns.mean() != 0:
+        sharpe = np.sqrt(periods_per_year) * excess_returns.mean() / excess_returns.std()
     else:
         sharpe = 0
 
@@ -178,24 +201,19 @@ def _calc_metrics(equity_df, trades_df, panel):
     # 平均持仓数
     avg_hold = equity_df["n_stocks"].mean()
 
-    # 月均换手率（每月全部换仓，100%）
-    monthly_turnover = 1.0
-
     metrics.update({
         "总收益": f"{total_return:.1%}",
         "年化收益": f"{ann_return:.1%}",
         "最大回撤": f"{max_dd:.1%}",
         "夏普比率": f"{sharpe:.2f}",
         "胜率": f"{win_rate:.0%}",
-        "月均换手": f"{monthly_turnover:.0%}",
-        "平均持仓数": f"{avg_hold:.0f}",
         "调仓次数": len(equity_df),
     })
 
     return metrics
 
 
-def run_backtest(panel, fin_ffill, top_n_list=None):
+def run_backtest(panel, fin_ffill, top_n_list=None, tx_cost=0.002, dynamic_universe=True):
     """运行多组参数回测并汇总。"""
     if top_n_list is None:
         top_n_list = [10, 20, 30]
@@ -203,7 +221,8 @@ def run_backtest(panel, fin_ffill, top_n_list=None):
     all_results = []
     for top_n in top_n_list:
         print(f"\n--- TOP {top_n} 回测 ---")
-        equity_df, trades_df, metrics = backtest(panel, fin_ffill, top_n=top_n)
+        equity_df, trades_df, metrics = backtest(panel, fin_ffill, top_n=top_n,
+                                                  tx_cost=tx_cost, dynamic_universe=dynamic_universe)
 
         summary = {"top_n": top_n}
         summary.update(metrics)
@@ -278,7 +297,7 @@ def build_industry_map(basic_df):
     return mapping
 
 
-def compare_industry_neutralize(panel, fin_ffill, basic_df):
+def compare_industry_neutralize(panel, fin_ffill, basic_df, tx_cost=0.002, dynamic_universe=True):
     """对比行业中性化前后的回测效果。"""
     industry_map = build_industry_map(basic_df)
 
@@ -289,7 +308,8 @@ def compare_industry_neutralize(panel, fin_ffill, basic_df):
             print(f"\n--- {label} ---")
             im = industry_map if neutralize else None
             eq, td, met = backtest(panel, fin_ffill, top_n=top_n,
-                                   industry_map=im, max_industry_pct=0.25)
+                                   industry_map=im, max_industry_pct=0.25,
+                                   tx_cost=tx_cost, dynamic_universe=dynamic_universe)
             met["参数"] = label
             results.append(met)
 
@@ -311,14 +331,15 @@ def compare_industry_neutralize(panel, fin_ffill, basic_df):
     return summary
 
 
-def compare_frequencies(panel, fin_ffill, top_n=20):
+def compare_frequencies(panel, fin_ffill, top_n=20, tx_cost=0.002, dynamic_universe=True):
     """对比不同调仓频率的回测效果。"""
     freqs = [("周频", "W"), ("双周", "2W"), ("月频", "M"), ("双月", "2M"), ("季度", "Q")]
     results = []
     for label, freq in freqs:
         print(f"\n--- {label} ---")
         try:
-            eq, td, met = backtest(panel, fin_ffill, top_n=top_n, freq=freq)
+            eq, td, met = backtest(panel, fin_ffill, top_n=top_n, freq=freq,
+                                    tx_cost=tx_cost, dynamic_universe=dynamic_universe)
             met["参数"] = label
             results.append(met)
         except Exception as e:
@@ -385,3 +406,236 @@ th {{ background: #f0f0f0; }}
 </html>"""
     with open(f"{OUTPUT_DIR}/industry_neutralize_compare.html", "w", encoding="utf-8") as f:
         f.write(html)
+
+
+def backtest_stop_loss(panel, fin_ffill, top_n=20, freq="2M",
+                       tx_cost=0.002, dynamic_universe=True,
+                       stop_loss=-0.12):
+    """带盘中止损+替换的调仓回测（v2 修正版）。
+
+    设计要点：
+      - 评分日 rebal_date 收盘后打分 → 次日收盘价买入（消除前视）
+      - 止损判断: 使用 D-1 收盘价判断是否触发
+      - 止损执行: 在 D 日收盘卖出 + 买入替代票
+      - 现金结算: bucket_capital 直接跟踪每个仓位的现金价值
+    """
+    rebalance_dates = get_rebalance_dates(panel, freq=freq)
+    scorer = MultiFactorScorer()
+    trade_dates = sorted(panel.index.get_level_values("trade_date").unique())
+    warmup = max(120, int(len(trade_dates) * 0.05))
+    valid_start = trade_dates[warmup] if warmup < len(trade_dates) else trade_dates[0]
+    rebalance_dates = [d for d in rebalance_dates if d >= valid_start]
+    print("[backtest_sl] 区间: {} ~ {}".format(rebalance_dates[0], rebalance_dates[-1]))
+    print("[backtest_sl] 调仓: {}次, 止损线: {:.0%}".format(len(rebalance_dates), stop_loss))
+
+    portfolio_value = 1.0
+    equity_curve = []
+    trades_records = []
+    sl_events = []
+
+    if dynamic_universe:
+        print("[backtest_sl] 动态滚动universe")
+
+    for i, rebal_date in enumerate(rebalance_dates):
+        if i >= len(rebalance_dates) - 1:
+            break
+        next_rebal = rebalance_dates[i + 1]
+
+        try:
+            scores = scorer.score(panel, fin_ffill, rebal_date)
+        except Exception as e:
+            print("  [skip] {}: {}".format(rebal_date, e))
+            continue
+
+        if dynamic_universe:
+            universe_at_date = get_universe_at_date(panel, rebal_date)
+            scores = scores[scores.index.isin(universe_at_date)]
+
+        if len(scores.dropna()) < top_n:
+            continue
+
+        sorted_candidates = scores.dropna().sort_values(ascending=False).index.tolist()
+        top_stocks = sorted_candidates[:top_n]
+
+        # 次日收盘价成交: rebal_date+1 买入
+        rebal_idx = trade_dates.index(rebal_date)
+        if rebal_idx + 1 >= len(trade_dates):
+            continue
+        entry_date = trade_dates[rebal_idx + 1]
+
+        exit_idx = trade_dates.index(next_rebal)
+        if exit_idx + 1 >= len(trade_dates):
+            continue
+        exit_date = trade_dates[exit_idx + 1]
+
+        # 持仓初始化: 等权分配资金
+        bucket_capital = {}  # code -> 当前现金价值
+        entry_prices = {}
+        entry_close = panel.loc[entry_date, "close"]
+        for code in top_stocks:
+            cp = entry_close.get(code)
+            if cp is not None and cp > 0 and not pd.isna(cp):
+                bucket_capital[code] = 0.0  # 临时赋值
+                entry_prices[code] = cp
+
+        if len(bucket_capital) == 0:
+            continue
+
+        n = len(bucket_capital)
+        eq_capital = portfolio_value / n
+        for code in bucket_capital:
+            bucket_capital[code] = eq_capital
+
+        # 每日止损监控（从 entry_date+1 开始）
+        period_dates = [d for d in trade_dates if entry_date < d <= exit_date]
+        n_sl = 0
+
+        for day in period_dates:
+            # 使用 D-1 收盘判断
+            prev_idx = trade_dates.index(day) - 1
+            if prev_idx < 0:
+                continue
+            prev_close = panel.loc[trade_dates[prev_idx], "close"]
+
+            sell_queue = []
+            for code in list(entry_prices.keys()):
+                ep = entry_prices[code]
+                pc = prev_close.get(code)
+                if pc is None or pc == 0 or pd.isna(pc):
+                    continue
+                ret = pc / ep - 1.0
+                if ret <= stop_loss:
+                    sell_queue.append(code)
+
+            if not sell_queue:
+                continue
+
+            # 在 D 日收盘执行卖出+买入
+            day_close = panel.loc[day, "close"]
+            for code in sell_queue:
+                ep = entry_prices[code]
+                sp = day_close.get(code)
+                if sp is None or sp == 0 or pd.isna(sp):
+                    continue
+                ret_actual = sp / ep - 1.0
+                # 现金结算
+                cash = bucket_capital[code] * sp / ep
+                del bucket_capital[code]
+                del entry_prices[code]
+                n_sl += 1
+
+                sl_events.append({
+                    "rebal_date": rebal_date,
+                    "exit_date": exit_date,
+                    "sell_date": day,
+                    "sold_code": code,
+                    "entry_price": ep,
+                    "sell_price": sp,
+                    "loss_pct": ret_actual,
+                })
+
+                # 找替代票：最高评分不在持仓的（排除刚卖出的同票）
+                replacement = None
+                for cand in sorted_candidates:
+                    if cand not in entry_prices and cand != code:
+                        bp = day_close.get(cand)
+                        if bp is not None and bp > 0 and not pd.isna(bp):
+                            replacement = cand
+                            break
+
+                if replacement is not None:
+                    bucket_capital[replacement] = cash
+                    entry_prices[replacement] = bp
+
+        # 期末结算
+        total_value = 0.0
+        n_final = 0
+        held_codes = []
+        exit_close = panel.loc[exit_date, "close"]
+        for code in list(entry_prices.keys()):
+            ep = entry_prices[code]
+            ec = exit_close.get(code)
+            if ec is not None and ec > 0 and not pd.isna(ec):
+                total_value += bucket_capital[code] * ec / ep
+                n_final += 1
+                held_codes.append(code)
+
+        if n_final == 0:
+            continue
+
+        period_ret = total_value / portfolio_value - 1.0
+        # 交易成本: 初始买入(N次) + 期末卖出(N次) + 每笔止损(卖出+买入, n_sl组)
+        total_trades = n + n + 2 * n_sl  # 初始买 + 期末卖 + 止损买卖
+        period_ret -= total_trades * tx_cost / n
+
+        portfolio_value = total_value  # 更新组合净值
+
+        equity_curve.append({
+            "date": exit_date,
+            "portfolio_value": portfolio_value,
+            "period_return": period_ret,
+            "n_stocks": n_final,
+            "n_sl_events": n_sl,
+        })
+
+        top5_str = ";".join(held_codes[:5]) + ("...({})".format(n_final) if n_final > 5 else "")
+        trades_records.append({
+            "entry_date": entry_date,
+            "exit_date": exit_date,
+            "stocks": top5_str,
+            "n_stocks": n_final,
+            "period_return": period_ret,
+            "n_sl_events": n_sl,
+        })
+
+    equity_df = pd.DataFrame(equity_curve)
+    trades_df = pd.DataFrame(trades_records)
+    sl_events_df = pd.DataFrame(sl_events)
+
+    metrics = _calc_metrics(equity_df, trades_df, panel)
+    if len(sl_events_df) > 0:
+        metrics["止损次数"] = str(len(sl_events_df))
+        avg_sl = sl_events_df["loss_pct"].mean()
+        metrics["平均止损幅度"] = "{:.1%}".format(avg_sl)
+
+    return equity_df, trades_df, sl_events_df, metrics
+
+
+def compare_stop_loss(panel, fin_ffill, top_n=20, freq="2M",
+                      tx_cost=0.002, dynamic_universe=True):
+    """对比无止损 vs 带止损的双月回测效果。"""
+    results = []
+
+    print("\n--- 无止损 (双月) ---")
+    eq, td, met = backtest(panel, fin_ffill, top_n=top_n, freq=freq,
+                           tx_cost=tx_cost, dynamic_universe=dynamic_universe)
+    met["参数"] = "无止损"
+    met["止损次数"] = "0"
+    results.append(met)
+
+    for sl in [-0.08, -0.12, -0.16]:
+        print(f"\n--- 止损 {sl:.0%} (双月) ---")
+        eq, td, sl_df, met = backtest_stop_loss(panel, fin_ffill, top_n=top_n, freq=freq,
+                                                 tx_cost=tx_cost,
+                                                 dynamic_universe=dynamic_universe,
+                                                 stop_loss=sl)
+        met["参数"] = "止损{:.0%}".format(sl)
+        results.append(met)
+
+        sl_path = "{}/stop_loss/sl_{}pct".format(OUTPUT_DIR, abs(int(sl * 100)))
+        Path(sl_path).mkdir(parents=True, exist_ok=True)
+        eq.to_csv(sl_path + "/equity.csv", index=False, encoding="utf-8-sig")
+        td.to_csv(sl_path + "/trades.csv", index=False, encoding="utf-8-sig")
+        if len(sl_df) > 0:
+            sl_df.to_csv(sl_path + "/sl_events.csv", index=False, encoding="utf-8-sig")
+
+    summary = pd.DataFrame(results)
+    summary.to_csv("{}/stop_loss_comparison.csv".format(OUTPUT_DIR),
+                   index=False, encoding="utf-8-sig")
+
+    print("\n" + "=" * 80)
+    print("止损效果对比 (双月 TOP{})".format(top_n))
+    print("=" * 80)
+    print(summary.to_string(index=False))
+
+    return summary

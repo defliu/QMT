@@ -17,7 +17,7 @@ from research.multi_factor_ic.config import (
 
 
 def load_universe():
-    """加载中证500+1000候选池（按市值排名过滤）。"""
+    """加载全量候选池（按市值排名前4000），用于build_panel构建宽面板。"""
     daily = pd.read_parquet(DAILY_PATH)
     idx = daily.index
     latest_date = idx.get_level_values("trade_date").max()
@@ -27,9 +27,27 @@ def load_universe():
     latest["circ_mv"] = latest["circ_mv"].fillna(0)
 
     sorted_idx = latest["circ_mv"].sort_values(ascending=False).index
-    selected = sorted_idx[UNIVERSE_RANK_START:UNIVERSE_RANK_END]
+    selected = sorted_idx[:4000]
     codes = set(selected.get_level_values("ts_code"))
     return codes
+
+
+def get_universe_at_date(panel, date):
+    """获取 date 日在市值排名 [UNIVERSE_RANK_START, UNIVERSE_RANK_END) 区间内的股票。
+    
+    用于消除静态 universe 的生存偏差，实现动态滚动选股池。
+    """
+    trade_dates = sorted(panel.index.get_level_values("trade_date").unique())
+    # 找到 <= date 的最新交易日
+    valid = [d for d in trade_dates if d <= date]
+    if not valid:
+        return set()
+    nearest = valid[-1]
+    date_data = panel.loc[nearest]
+    circ_mv = date_data["circ_mv"].fillna(0)
+    ranked = circ_mv.sort_values(ascending=False)
+    selected = ranked.iloc[UNIVERSE_RANK_START:UNIVERSE_RANK_END]
+    return set(selected.index)
 
 
 def load_finance_data(codes):
@@ -46,7 +64,11 @@ def load_finance_data(codes):
 
 
 def build_panel(universe_codes):
-    """构建面板数据 DataFrame(date, code) -> factor_values。"""
+    """构建面板数据 DataFrame(date, code) -> factor_values。
+    
+    使用扩大后的 universe_codes（全量候选）避免生存偏差。
+    在回测阶段通过 get_universe_at_date 做动态日级过滤。
+    """
     print("[data_loader] 加载日线数据...")
     daily = pd.read_parquet(DAILY_PATH)
     idx = daily.index
@@ -54,7 +76,7 @@ def build_panel(universe_codes):
     mask = idx.get_level_values("ts_code").isin(list(universe_codes))
     daily = daily.loc[mask].copy()
     idx = daily.index
-    print(f"[data_loader] 按成分股过滤: {len(daily)} 行")
+    print(f"[data_loader] 按成分股过滤(宽池): {len(daily)} 行")
 
     trade_dates = idx.get_level_values("trade_date")
     start_ts = pd.Timestamp(START_DATE).date()

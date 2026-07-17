@@ -50,19 +50,21 @@ class MultiFactorScorer:
         raw = compute_all_factors(panel, fin_ffill, date)
 
         # 基本面预过滤
+        date_data = panel.loc[date]
+        idx = date_data.index
         if filter_func is not None:
             mask = filter_func(panel, fin_ffill, date)
         else:
-            date_data = panel.loc[date]
             mask = (date_data["pe_ttm"] > 0) & (date_data["pb"] > 0)
-            # ROE 过滤
+            # ROE 过滤（需对齐索引到当日股票, 考虑财报披露滞后45天）
             fin_dates = fin_ffill.index
-            valid = fin_dates[fin_dates <= pd.Timestamp(date)]
+            lookup_date = pd.Timestamp(date) - pd.Timedelta(days=45)
+            valid = fin_dates[fin_dates <= lookup_date]
             if len(valid) > 0:
                 roe = fin_ffill.loc[valid[-1], "roe"]
-                mask = mask & (roe >= -20)
-            # 市值过滤（避免微盘股）
-            mask = mask & (date_data["circ_mv"] > 5e8)
+                mask = mask & (roe.reindex(idx, fill_value=False) >= -20)
+            # 市值过滤（避免微盘股, circ_mv 单位为万元）
+            mask = mask & (date_data["circ_mv"] > 5e4)
 
         for name in raw:
             raw[name] = raw[name].where(mask, other=np.nan)
