@@ -46,7 +46,8 @@ def _apply_tx_costs(returns, one_way_cost=0.002):
 
 def backtest(panel, fin_ffill, top_n=20, hold=1,
              industry_map=None, max_industry_pct=0.25, freq="M",
-             tx_cost=0.002, dynamic_universe=True):
+             tx_cost=0.002, dynamic_universe=True, filter_func=None, weights=None,
+             start_date=None, end_date=None):
     """运行调仓回测。
 
     Args:
@@ -70,7 +71,13 @@ def backtest(panel, fin_ffill, top_n=20, hold=1,
     warmup = max(120, int(len(trade_dates) * 0.05))
     valid_start = trade_dates[warmup] if warmup < len(trade_dates) else trade_dates[0]
 
-    rebalance_dates = [d for d in rebalance_dates if d >= valid_start]
+    # 区间截断（用于分行情区间验证，禁止未来数据泄漏）
+    valid_start_ts = pd.Timestamp(valid_start)
+    if start_date is not None:
+        valid_start_ts = max(valid_start_ts, pd.Timestamp(start_date))
+    if end_date is not None:
+        rebalance_dates = [d for d in rebalance_dates if pd.Timestamp(d) <= pd.Timestamp(end_date)]
+    rebalance_dates = [d for d in rebalance_dates if pd.Timestamp(d) >= valid_start_ts]
     print(f"[backtest] 回测区间: {rebalance_dates[0]} ~ {rebalance_dates[-1]}")
     print(f"[backtest] 调仓次数: {len(rebalance_dates)}")
 
@@ -83,7 +90,7 @@ def backtest(panel, fin_ffill, top_n=20, hold=1,
 
     for i, rebal_date in enumerate(rebalance_dates):
         try:
-            scores = scorer.score(panel, fin_ffill, rebal_date)
+            scores = scorer.score(panel, fin_ffill, rebal_date, filter_func=filter_func, weights=weights)
         except Exception as e:
             print(f"  [skip] {rebal_date}: {e}")
             continue
@@ -120,8 +127,8 @@ def backtest(panel, fin_ffill, top_n=20, hold=1,
             stock_returns = []
             held_stocks = []
             for code in top_stocks:
-                entry_close = panel.loc[entry_date, "close"].get(code)
-                exit_close = panel.loc[exit_date, "close"].get(code)
+                entry_close = panel.loc[entry_date, "open"].get(code)
+                exit_close = panel.loc[exit_date, "open"].get(code)
 
                 if entry_close is None or exit_close is None or entry_close == 0:
                     continue
@@ -176,10 +183,20 @@ def _calc_metrics(equity_df, trades_df, panel):
     first_date = pd.Timestamp(equity_df["date"].iloc[0])
     last_date = pd.Timestamp(equity_df["date"].iloc[-1])
     years = (last_date - first_date).days / 365.25
+    # 保守下限：按实际调仓周期数估算（每个周期=调仓频率），避免短区间年化虚高
+    if len(equity_df) >= 1:
+        min_years = len(equity_df) / 6.0  # 双月调仓=每年6次，最少按实际周期数估算年数
+        years = max(years, min_years)
     years = max(years, 1 / 12)
 
     # 年化收益
-    ann_return = (1 + total_return) ** (1 / years) - 1
+    if len(equity_df) < 3:
+        # 短区间样本不足：年化不可信，仅报累计收益并标注
+        ann_return = total_return
+        ann_note = " (样本不足{}期, 仅累计)".format(len(equity_df))
+    else:
+        ann_return = (1 + total_return) ** (1 / years) - 1
+        ann_note = ""
 
     # 最大回撤
     cummax = equity_df["portfolio_value"].cummax()
@@ -203,7 +220,7 @@ def _calc_metrics(equity_df, trades_df, panel):
 
     metrics.update({
         "总收益": f"{total_return:.1%}",
-        "年化收益": f"{ann_return:.1%}",
+        "年化收益": f"{ann_return:.1%}{ann_note}" if len(equity_df) < 3 else f"{ann_return:.1%}",
         "最大回撤": f"{max_dd:.1%}",
         "夏普比率": f"{sharpe:.2f}",
         "胜率": f"{win_rate:.0%}",
@@ -410,7 +427,9 @@ th {{ background: #f0f0f0; }}
 
 def backtest_stop_loss(panel, fin_ffill, top_n=20, freq="2M",
                        tx_cost=0.002, dynamic_universe=True,
-                       stop_loss=-0.12):
+                       stop_loss=-0.12, filter_func=None, weights=None,
+                       start_date=None, end_date=None, max_weight_per_stock=None,
+                       save_details=False, basic_df=None):
     """带盘中止损+替换的调仓回测（v2 修正版）。
 
     设计要点：
@@ -424,7 +443,13 @@ def backtest_stop_loss(panel, fin_ffill, top_n=20, freq="2M",
     trade_dates = sorted(panel.index.get_level_values("trade_date").unique())
     warmup = max(120, int(len(trade_dates) * 0.05))
     valid_start = trade_dates[warmup] if warmup < len(trade_dates) else trade_dates[0]
-    rebalance_dates = [d for d in rebalance_dates if d >= valid_start]
+    # 区间截断（用于分行情区间验证，禁止未来数据泄漏）
+    valid_start_ts = pd.Timestamp(valid_start)
+    if start_date is not None:
+        valid_start_ts = max(valid_start_ts, pd.Timestamp(start_date))
+    if end_date is not None:
+        rebalance_dates = [d for d in rebalance_dates if pd.Timestamp(d) <= pd.Timestamp(end_date)]
+    rebalance_dates = [d for d in rebalance_dates if pd.Timestamp(d) >= valid_start_ts]
     print("[backtest_sl] 区间: {} ~ {}".format(rebalance_dates[0], rebalance_dates[-1]))
     print("[backtest_sl] 调仓: {}次, 止损线: {:.0%}".format(len(rebalance_dates), stop_loss))
 
@@ -432,6 +457,7 @@ def backtest_stop_loss(panel, fin_ffill, top_n=20, freq="2M",
     equity_curve = []
     trades_records = []
     sl_events = []
+    holdings_details = []  # For save_details=True
 
     if dynamic_universe:
         print("[backtest_sl] 动态滚动universe")
@@ -442,7 +468,7 @@ def backtest_stop_loss(panel, fin_ffill, top_n=20, freq="2M",
         next_rebal = rebalance_dates[i + 1]
 
         try:
-            scores = scorer.score(panel, fin_ffill, rebal_date)
+            scores = scorer.score(panel, fin_ffill, rebal_date, filter_func=filter_func, weights=weights)
         except Exception as e:
             print("  [skip] {}: {}".format(rebal_date, e))
             continue
@@ -468,10 +494,10 @@ def backtest_stop_loss(panel, fin_ffill, top_n=20, freq="2M",
             continue
         exit_date = trade_dates[exit_idx + 1]
 
-        # 持仓初始化: 等权分配资金
+        # 持仓初始化: 等权分配资金（支持单票上限）
         bucket_capital = {}  # code -> 当前现金价值
         entry_prices = {}
-        entry_close = panel.loc[entry_date, "close"]
+        entry_close = panel.loc[entry_date, "open"]
         for code in top_stocks:
             cp = entry_close.get(code)
             if cp is not None and cp > 0 and not pd.isna(cp):
@@ -482,9 +508,46 @@ def backtest_stop_loss(panel, fin_ffill, top_n=20, freq="2M",
             continue
 
         n = len(bucket_capital)
-        eq_capital = portfolio_value / n
-        for code in bucket_capital:
-            bucket_capital[code] = eq_capital
+        if max_weight_per_stock is not None:
+            # 单票上限：先按上限分配，剩余资金平分给未达上限的票（迭代至收敛）
+            caps = {code: portfolio_value * max_weight_per_stock for code in bucket_capital}
+            allocated = {code: 0.0 for code in bucket_capital}
+            remaining = portfolio_value
+            active = list(bucket_capital.keys())
+            while remaining > 1e-6 and active:
+                per = remaining / len(active)
+                still_active = []
+                for code in active:
+                    give = min(per, caps[code] - allocated[code])
+                    allocated[code] += give
+                    remaining -= give
+                    if allocated[code] < caps[code] - 1e-6:
+                        still_active.append(code)
+                active = still_active
+            for code in bucket_capital:
+                bucket_capital[code] = allocated[code]
+        else:
+            eq_capital = portfolio_value / n
+            for code in bucket_capital:
+                bucket_capital[code] = eq_capital
+
+        # ===== save_details: 采集逐股持仓明细 (Phase 0补存) =====
+        if save_details and basic_df is not None:
+            ind_map = dict(zip(basic_df['ts_code'], basic_df['industry']))
+            score_map = scores.to_dict()
+            try:
+                mv_map = panel.loc[rebal_date, 'circ_mv'].to_dict()
+            except (KeyError, IndexError):
+                mv_map = {}
+            for code in bucket_capital:
+                holdings_details.append({
+                    'rebalance_date': rebal_date,
+                    'stock_code': code,
+                    'weight': bucket_capital[code] / portfolio_value,
+                    'raw_score': score_map.get(code, pd.NA),
+                    'industry': ind_map.get(code, '未知'),
+                    'circ_mv': mv_map.get(code, pd.NA),
+                })
 
         # 每日止损监控（从 entry_date+1 开始）
         period_dates = [d for d in trade_dates if entry_date < d <= exit_date]
@@ -510,8 +573,8 @@ def backtest_stop_loss(panel, fin_ffill, top_n=20, freq="2M",
             if not sell_queue:
                 continue
 
-            # 在 D 日收盘执行卖出+买入
-            day_close = panel.loc[day, "close"]
+            # 在 D 日开盘执行卖出+买入
+            day_close = panel.loc[day, "open"]
             for code in sell_queue:
                 ep = entry_prices[code]
                 sp = day_close.get(code)
@@ -551,10 +614,10 @@ def backtest_stop_loss(panel, fin_ffill, top_n=20, freq="2M",
         total_value = 0.0
         n_final = 0
         held_codes = []
-        exit_close = panel.loc[exit_date, "close"]
+        exit_open = panel.loc[exit_date, "open"]
         for code in list(entry_prices.keys()):
             ep = entry_prices[code]
-            ec = exit_close.get(code)
+            ec = exit_open.get(code)
             if ec is not None and ec > 0 and not pd.isna(ec):
                 total_value += bucket_capital[code] * ec / ep
                 n_final += 1
@@ -597,6 +660,17 @@ def backtest_stop_loss(panel, fin_ffill, top_n=20, freq="2M",
         metrics["止损次数"] = str(len(sl_events_df))
         avg_sl = sl_events_df["loss_pct"].mean()
         metrics["平均止损幅度"] = "{:.1%}".format(avg_sl)
+
+    # ===== save_details: 导出逐股持仓明细文件 (Phase 0补存) =====
+    if save_details:
+        if len(holdings_details) > 0:
+            detail_path = Path(__file__).parent / "reports/v3_optimize/holdings_detail.csv"
+            detail_path.parent.mkdir(parents=True, exist_ok=True)
+            holdings_df = pd.DataFrame(holdings_details)
+            holdings_df.to_csv(detail_path, index=False, encoding="utf-8-sig")
+            print(f"[save_details] 已导出 {len(holdings_df)} 条持仓明细至: {detail_path.resolve()}")
+        else:
+            print("[save_details] 警告: 无持仓明细可导出，请检查basic_df参数是否正确传入")
 
     return equity_df, trades_df, sl_events_df, metrics
 

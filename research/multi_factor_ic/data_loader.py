@@ -88,6 +88,7 @@ def build_panel(universe_codes):
     idx = daily.index
     panel = pd.DataFrame({
         "close": daily["close"].values,
+        "open": daily["open"].values,
         "pe_ttm": daily["pe_ttm"].values,
         "pb": daily["pb"].values,
         "dv_ratio": daily["dv_ratio"].values,

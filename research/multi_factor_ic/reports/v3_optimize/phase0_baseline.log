@@ -1,0 +1,15 @@
+[data_loader] 加载日线数据...
+[data_loader] 按成分股过滤(宽池): 9398246 行
+[data_loader] 按日期过滤: 6213648 行
+[data_loader] 去ST/停牌后: 6021163 行
+[data_loader] 加载财务数据...
+[data_loader] 面板构建完成: (6021163, 11)
+[backtest_sl] 区间: 2018-07-31 ~ 2026-06-18
+[backtest_sl] 调仓: 57次, 止损线: -12%
+[backtest_sl] 动态滚动universe
+PHASE0 基线复现:
+  年化=15.5% 夏普=0.50 回撤=-20.5%
+  预期: 年化15.0-16.0%, 回撤-19.5%~-21.5%
+  硬门结果: ✅ PASS
+
+✅ 硬门通过，继续执行Phase 1/2

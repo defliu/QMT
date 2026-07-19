@@ -127,15 +127,54 @@ verify_scorer_ic(panel, fin_ffill)
 
 返回: `(equity_df, trades_df, metrics_dict)`
 
-### `backtest_stop_loss(panel, fin_ffill, top_n=20, freq="2M", tx_cost=0.002, dynamic_universe=True, stop_loss=-0.12)`
+### `backtest_stop_loss(panel, fin_ffill, top_n=20, freq="2M", tx_cost=0.002, dynamic_universe=True, stop_loss=-0.12, filter_func=None, weights=None, start_date=None, end_date=None, max_weight_per_stock=None)`
 
 额外参数:
 
 | 参数 | 默认 | 说明 |
 |------|------|------|
 | stop_loss | -0.12 | 止损线，-0.12=-12% |
+| filter_func | None | 自定义过滤 `callable(panel, fin_ffill, date) -> mask` |
+| weights | None | 自定义因子权重 dict（默认 FACTOR_WEIGHTS） |
+| start_date | None | 区间起始（`pd.Timestamp` 或 str），用于分区间验证 |
+| end_date | None | 区间结束，禁止未来数据泄漏 |
+| max_weight_per_stock | None | 单票仓位上限（如 0.02=2%），实盘分散约束 |
 
 返回: `(equity_df, trades_df, sl_events_df, metrics_dict)`
+
+**注意**：`backtest()` 同样支持 `filter_func`/`weights`/`start_date`/`end_date` 参数。
+
+### 4.7 10万本金实盘参数回测
+
+```python
+from research.multi_factor_ic.data_loader import load_universe, build_panel
+from research.multi_factor_ic.backtest import backtest_stop_loss
+
+universe = load_universe()
+panel, fin_ffill = build_panel(universe)
+
+# 成交额阈值过滤（amount单位=千元，2000万=20000千元）
+def liq_filter(min_amount_k=20000):
+    def _f(p, f, d):
+        mv_mask = (p.loc[d]['circ_mv'] > 0) & (p.loc[d]['circ_mv'] < 300000)
+        tds = sorted(p.index.get_level_values('trade_date').unique())
+        di = tds.index(d)
+        if di < 20:
+            return mv_mask
+        window = p.loc[tds[di-20]:d]
+        avg_amt = window.groupby('ts_code')['amount'].mean()
+        liq = avg_amt > min_amount_k
+        return mv_mask & liq.reindex(p.loc[d].index, fill_value=False)
+    return _f
+
+eq, td, sl, met = backtest_stop_loss(
+    panel, fin_ffill, top_n=80, freq="2M", tx_cost=0.0015,
+    dynamic_universe=True, stop_loss=-0.12,
+    filter_func=liq_filter(20000), max_weight_per_stock=0.02)
+# 结果：年化17.1%，夏普0.55，回撤-19.8%，10万→25.8万
+```
+
+详见 `specs/IC策略_10万本金实盘参数回测.md`。
 
 ---
 

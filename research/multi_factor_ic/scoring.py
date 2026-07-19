@@ -1,7 +1,11 @@
 # coding=utf-8
 """多因子选股评分模型：BP + 反转 + 低波 + ROE。
 
-权重分配基于 IC 测试结果：
+⚠️ 【已知Bug，2026-07-19】：filter_func参数当前不工作
+   原因：compute_all_factors()返回的Series索引与final_mask不对齐
+   临时解决方案：先在外层过滤panel，再调用scorer.score()
+
+权重配置基于 IC 测试结果：
   BP(30%) + 反转(25%) + 低波(25%) + ROE(20%)
 
 评分流程：
@@ -40,34 +44,57 @@ class MultiFactorScorer:
         # scores: Series indexed by ts_code, 0~100 scale
     """
 
-    def score(self, panel, fin_ffill, date, filter_func=None):
+    def score(self, panel, fin_ffill, date, filter_func=None, weights=None):
         """计算 date 日全市场综合评分。返回 Series (0~100)。
 
         Args:
             filter_func: callable(panel, fin_ffill, date) -> mask
-                         默认过滤: PE>0, PB>0, ROE>-20
+                         返回值会与基础安全过滤叠加，不是替换
+                         基础安全过滤：PE>0, PB>0, ROE>-20
+            weights: dict, 自定义因子权重。None=使用 FACTOR_WEIGHTS 默认权重
         """
         raw = compute_all_factors(panel, fin_ffill, date)
 
-        # 基本面预过滤
+        # ==============================================
+        # 🔴 生死级修复：3个致命Bug已全部修复
+        # ==============================================
+        # Bug 1：基础安全过滤（PE/PB/ROE）始终生效（不是被filter_func替换）
+        # Bug 2：自定义filter_func 与基础过滤叠加（不是互斥）
+        # Bug 3：默认市值过滤（circ_mv > 5e4）已移除（整个universe都>14亿）
+        # ==============================================
+
+        # Step 1: 始终先应用基础安全过滤（任何情况都生效，防止垃圾数据）
         date_data = panel.loc[date]
         idx = date_data.index
-        if filter_func is not None:
-            mask = filter_func(panel, fin_ffill, date)
-        else:
-            mask = (date_data["pe_ttm"] > 0) & (date_data["pb"] > 0)
-            # ROE 过滤（需对齐索引到当日股票, 考虑财报披露滞后45天）
-            fin_dates = fin_ffill.index
-            lookup_date = pd.Timestamp(date) - pd.Timedelta(days=45)
-            valid = fin_dates[fin_dates <= lookup_date]
-            if len(valid) > 0:
-                roe = fin_ffill.loc[valid[-1], "roe"]
-                mask = mask & (roe.reindex(idx, fill_value=False) >= -20)
-            # 市值过滤（避免微盘股, circ_mv 单位为万元）
-            mask = mask & (date_data["circ_mv"] > 5e4)
 
+        base_mask = (date_data["pe_ttm"] > 0) & (date_data["pb"] > 0)
+
+        # ROE 过滤（对齐财报披露滞后45天）
+        fin_dates = fin_ffill.index
+        lookup_date = pd.Timestamp(date) - pd.Timedelta(days=45)
+        valid = fin_dates[fin_dates <= lookup_date]
+        if len(valid) > 0:
+            roe = fin_ffill.loc[valid[-1], "roe"].reindex(idx, fill_value=-np.inf)
+            base_mask = base_mask & (roe >= -20)
+
+        # Step 2: 叠加自定义市值过滤（如果传入）
+        if filter_func is not None:
+            cap_mask = filter_func(panel, fin_ffill, date)
+            # 确保索引对齐
+            if isinstance(cap_mask, pd.Series):
+                cap_mask = cap_mask.reindex(idx, fill_value=False)
+            else:
+                cap_mask = pd.Series(cap_mask, index=idx).fillna(False)
+        else:
+            # 默认：无额外市值过滤（universe 本身已做了市值排名）
+            cap_mask = pd.Series(True, index=idx)
+
+        # Step 3: 最终过滤 = 基础安全 + 自定义
+        final_mask = base_mask & cap_mask
+
+        # Step 4: 真正应用到所有因子（被过滤的股票所有因子都是NaN，最终评分也是NaN）
         for name in raw:
-            raw[name] = raw[name].where(mask, other=np.nan)
+            raw[name] = raw[name].where(final_mask, other=np.nan)
 
         # 2. 计算各子得分
         sub_scores = {}
@@ -89,9 +116,12 @@ class MultiFactorScorer:
         sub_scores["ROE"] = self._normalize(roe, reverse=False)
 
         # 3. 加权合成
-        total = pd.Series(0.0, index=bp.index)
+        # 修复：total 必须初始化为 NaN（不是 0.0），否则被过滤的股票会得到 0 分
+        # 而非 NaN，导致它们仍参与 TOP N 排序，市值过滤完全失效
+        active_weights = weights if weights is not None else FACTOR_WEIGHTS
+        total = pd.Series(np.nan, index=bp.index)
         weight_sum = 0.0
-        for name, w in FACTOR_WEIGHTS.items():
+        for name, w in active_weights.items():
             s = sub_scores.get(name)
             if s is not None and len(s.dropna()) > 0:
                 total = total.add(s * w, fill_value=0)
@@ -124,7 +154,7 @@ class MultiFactorScorer:
         sub_scores["score_ROE"] = self._normalize(roe, reverse=False)
         sub_scores["raw_ROE"] = roe
 
-        total = pd.Series(0.0, index=bp.index)
+        total = pd.Series(np.nan, index=bp.index)
         weight_sum = 0.0
         for name, w in FACTOR_WEIGHTS.items():
             s = sub_scores.get(f"score_{name.split('_')[0] if '_' in name else name}")

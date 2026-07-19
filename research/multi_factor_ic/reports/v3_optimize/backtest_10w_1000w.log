@@ -1,0 +1,15 @@
+[data_loader] 加载日线数据...
+[data_loader] 按成分股过滤(宽池): 9398246 行
+[data_loader] 按日期过滤: 6213648 行
+[data_loader] 去ST/停牌后: 6021163 行
+[data_loader] 加载财务数据...
+[data_loader] 面板构建完成: (6021163, 11)
+[backtest_sl] 区间: 2018-07-31 ~ 2026-06-18
+[backtest_sl] 调仓: 57次, 止损线: -12%
+[backtest_sl] 动态滚动universe
+=== 10万本金 + 阈值1000万 ===
+  年化: 14.5% 夏普: 0.49 回撤: -23.0% 总收益: 125.6%
+  胜率: 55% 调仓: 29 止损: 585
+  耗时: 106秒
+  10万终值: 225617元 累计: 125617元
+保存: D:/QMT_STRATEGIES/research/multi_factor_ic/reports/v3_optimize/backtest_10w_1000w_result.csv

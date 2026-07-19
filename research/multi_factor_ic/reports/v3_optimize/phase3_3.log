@@ -1,0 +1,30 @@
+[data_loader] 加载日线数据...
+[data_loader] 按成分股过滤(宽池): 9398246 行
+[data_loader] 按日期过滤: 6213648 行
+[data_loader] 去ST/停牌后: 6021163 行
+[data_loader] 加载财务数据...
+[data_loader] 面板构建完成: (6021163, 11)
+面板加载完成: (6021163, 11)
+[backtest_sl] 区间: 2018-07-31 ~ 2026-06-18
+[backtest_sl] 调仓: 57次, 止损线: -12%
+[backtest_sl] 动态滚动universe
+费率1.0‰ 81s 年化=11.4% 夏普=0.39
+[backtest_sl] 区间: 2018-07-31 ~ 2026-06-18
+[backtest_sl] 调仓: 57次, 止损线: -12%
+[backtest_sl] 动态滚动universe
+费率2.0‰ 79s 年化=11.4% 夏普=0.34
+[backtest_sl] 区间: 2018-07-31 ~ 2026-06-18
+[backtest_sl] 调仓: 57次, 止损线: -12%
+[backtest_sl] 动态滚动universe
+费率3.0‰ 83s 年化=11.4% 夏普=0.29
+[backtest_sl] 区间: 2018-07-31 ~ 2026-06-18
+[backtest_sl] 调仓: 57次, 止损线: -12%
+[backtest_sl] 动态滚动universe
+费率5.0‰ 83s 年化=11.4% 夏普=0.19
+
+完成! 成本敏感性已保存: D:/QMT_STRATEGIES/research/multi_factor_ic/reports/v3_optimize/cost_sensitivity.csv
+单边费率  年化收益 夏普比率   最大回撤  耗时(秒)
+1.0‰ 11.4% 0.39 -21.9%   81.4
+2.0‰ 11.4% 0.34 -21.9%   79.3
+3.0‰ 11.4% 0.29 -21.9%   82.6
+5.0‰ 11.4% 0.19 -21.9%   82.8
