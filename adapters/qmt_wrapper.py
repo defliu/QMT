@@ -1354,7 +1354,8 @@ def _run_hold_pool_selection(C):
     # 缓存命中(每日只跑一次, 但14:50买入窗口前强制刷新一次)
     global _g_hold_pool_refreshed
     try:
-        now_str = _get_qmt_time(C)
+        _hb_t = _get_qmt_time(C)
+        now_str = _hb_t.strftime('%H%M') if hasattr(_hb_t, 'strftime') else str(_hb_t)
     except Exception:
         now_str = _dt.now().strftime('%H%M')
     is_buy_window = '1450' <= now_str <= '1500'

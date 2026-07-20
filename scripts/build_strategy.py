@@ -402,6 +402,10 @@ def main():
         _run_miniqmt_tests()
 
 
+if __name__ == '__main__':
+    main()
+
+
 def _run_miniqmt_tests():
     """构建后自动跑 miniQMT 测试（需本地QMT环境）"""
     QMT_PYTHON = r'E:\国金QMT交易端模拟\bin.x64\python.exe'
