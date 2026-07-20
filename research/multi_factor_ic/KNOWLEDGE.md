@@ -149,3 +149,48 @@ from research.multi_factor_ic.scoring import MultiFactorScorer, top_picks
 from research.multi_factor_ic.data_loader import load_universe, build_panel
 from research.multi_factor_ic.backtest import backtest, compare_frequencies
 ```
+
+## QMT 部署记录 (2026-07-20)
+
+### 部署状态
+- ✅ Layer 1 (数据通路) 完整验证通过
+- ✅ Layer 2 (策略核心) 100% 通过
+- ✅ 单文件策略已部署至 `E:\国金QMT交易端模拟\python\strategy_mfic.py`
+- ✅ commit `b735109` 已 push 至 origin/main
+
+### 文件架构
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| 生产版(部署用) | `strategy_mfic.py` (根目录) | GBK编码, QMT直接加载 |
+| 开发版(源码) | `research/multi_factor_ic/mfic_strategy/strategy_mfic_dev.py` | UTF-8, 含debug |
+| 构建脚本 | `research/multi_factor_ic/mfic_strategy/build_prod.py` | UTF-8→GBK转换 |
+| 测试脚本 | `scripts/qmt_test_mfic.py` | Layer1+2 分层测试 |
+| 模拟演示 | `scripts/qmt_simulate_mfic.py` | 模拟运行日志 |
+
+### QMT 数据通路实测结论
+- `xtdata.get_stock_list_in_sector("沪深A股")` → 5201只 ✅
+- `xtdata.get_market_data_ex(field_list=['close','open','amount'])` → 基础OHLCV字段 ✅
+- `xtdata.get_financial_data(['PERSHAREINDEX.du_return_on_equity'])` → ROE ✅
+- `xtdata.get_full_tick()` → 实时tick ✅
+- ⚠️ standalone xtdata **不支持** pe_ttm/pb/circ_mv/pct_chg 字段
+  - 这些财务/估值字段需在QMT `handlebar` 内通过 `C.get_market_data_ex()` 获取
+  - 这是QMT API独立模式的设计行为，非策略缺陷
+
+### 实盘运行时参数 (10万本金)
+| 参数 | 取值 |
+|------|------|
+| 本金 | 100,000元 |
+| 市值区间 | 0-30亿 |
+| 调仓频率 | 双月(偶数月最后一个交易日) |
+| 持仓数 | TOP80 |
+| 止损线 | -12% (每日尾盘检查) |
+| 成交额阈值 | >2000万 |
+| 单票上限 | 2% (~2000元/只) |
+| 预留现金 | 2% |
+| 买入隔离 | 持仓文件 `D:/QMT_POOL/mfic_positions.json` + `passorder(strRemark="mfic")` |
+
+### 运行日志验证
+- 非调仓日: 仅止损检查, 无操作
+- 调仓日(偶数月最后一交易日 14:30-14:55): 全市场扫描→过滤→4因子评分→TOP80→换仓
+- 止损触发: 跌幅>-12%自动卖出+最高评分替补替换
+- 日志前缀 `[MF]`，持仓持久化至 `mfic_positions.json`
