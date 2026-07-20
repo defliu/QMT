@@ -1,0 +1,37 @@
+# 稳健可实盘多因子 — 中盘 + 6 个训练集验证因子 + 等权 + 风控 + 择时
+# 设计见 specs/多因子稳健实盘策略_SPEC.md
+# 因子方向一致(越便宜/越小/越低换手=越高分),全部正权重
+backtest:
+  name: multi_factor_robust_midcap
+  start_date: "2021-01-01"
+  end_date: "2026-06-30"
+  initial_cash: 1000000.0
+  benchmark_code: "000300.SH"
+  benchmark_db_path: "F:/backtest_workspace/data/duckdb/benchmark_index.duckdb"
+data:
+  source: astock
+  path: "E:/astock/daily/stock_daily.parquet"
+  adjustment: hfq
+universe:
+  csv: "D:/QMT_STRATEGIES/backtest/data/universe/_midcap1200_mv.csv"
+execution:
+  price: next_open
+  slippage: 0.001
+  commission_rate: 0.00025
+  tax_rate: 0.0001
+strategy: research/multi_factor
+trading_model: next_open
+strategy_params:
+  alpha_ids:
+    - fundamental_low_turnover
+    - fundamental_smb
+    - fundamental_bp
+    - fundamental_sp
+    - fundamental_ep
+    - fundamental_dp
+  weights: [1, 1, 1, 1, 1, 1]
+  top_n: 30
+  max_positions: 30
+  rebalance_freq: weekly
+  min_history: 60
+  neutralize: true
