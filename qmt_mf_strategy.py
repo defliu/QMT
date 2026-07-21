@@ -796,6 +796,8 @@ def _check_stop_loss(C, trader, panel, fin_ffill):
 #  Price helper (last close from panel cache)
 # ============================================================
 _g_panel_cache = None
+_g_fin_ffill_cache = None
+_g_preload_date = None
 
 
 def _last_close(code):
@@ -845,10 +847,31 @@ def init(C):
 
 
 def handlebar(C):
-    global _g_panel_cache
+    global _g_panel_cache, _g_fin_ffill_cache, _g_preload_date
     now = _market_now(C)
-    # Only act in the last 5 minutes of the trading session (14:55-15:00)
     now_str = now.strftime('%H%M')
+    today_str = now.strftime('%Y%m%d')
+
+    # ===== 14:30-14:54: 预加载数据缓存 =====
+    if '1430' <= now_str < '1455':
+        if _g_preload_date != today_str:
+            print('[MF_IC] %s 预加载数据（14:30预热）...' % today_str)
+            codes = []
+            try:
+                all_codes = C.get_stock_list_in_sector('沪深A股')
+                codes = [c for c in all_codes if c.endswith('.SH') or c.endswith('.SZ')]
+            except Exception as e:
+                print('[MF_IC] get_stock_list_in_sector failed: %s' % e)
+            if codes:
+                panel, fin_ffill = _build_panel_via_xt(C, codes, count=130)
+                if panel is not None:
+                    _g_panel_cache = panel
+                    _g_fin_ffill_cache = fin_ffill
+                    _g_preload_date = today_str
+                    print('[MF_IC] 预加载完成 panel shape=%s' % str(panel.shape))
+        return
+
+    # ===== 14:55-15:00: 交易窗口 =====
     if not ('1455' <= now_str <= '1500'):
         return
 
@@ -856,20 +879,26 @@ def handlebar(C):
     if trader is None:
         return
 
-    # Refresh data for selection (use QMT xtdata)
-    codes = []
-    try:
-        all_codes = C.get_stock_list_in_sector('����A��')
-        codes = [c for c in all_codes if c.endswith('.SH') or c.endswith('.SZ')]
-    except Exception as e:
-        print('[MF_IC] get_stock_list_in_sector failed: %s' % e)
-        return
-
-    panel, fin_ffill = _build_panel_via_xt(C, codes, count=130)
-    if panel is None:
-        print('[MF_IC] data build failed, skip')
-        return
-    _g_panel_cache = panel
+    # 使用预加载缓存，没有则现场构建
+    if _g_panel_cache is not None and _g_preload_date == today_str:
+        panel = _g_panel_cache
+        fin_ffill = _g_fin_ffill_cache
+        print('[MF_IC] 使用预加载缓存 panel shape=%s' % str(panel.shape))
+    else:
+        codes = []
+        try:
+            all_codes = C.get_stock_list_in_sector('沪深A股')
+            codes = [c for c in all_codes if c.endswith('.SH') or c.endswith('.SZ')]
+        except Exception as e:
+            print('[MF_IC] get_stock_list_in_sector failed: %s' % e)
+            return
+        panel, fin_ffill = _build_panel_via_xt(C, codes, count=130)
+        if panel is None:
+            print('[MF_IC] data build failed, skip')
+            return
+        _g_panel_cache = panel
+        _g_fin_ffill_cache = fin_ffill
+        _g_preload_date = today_str
 
     # Stop-loss check first (uses latest two bars)
     try:
@@ -893,8 +922,6 @@ def handlebar(C):
             print('[MF_IC] rebalance error: %s' % e)
     else:
         print('[MF_IC] no rebalance due (last_ym=%d)' % _g_state.get('last_rebal_ym', 0))
-
-
 def exit(C):
     _save_state()
     print('[MF_IC] exit, state saved')

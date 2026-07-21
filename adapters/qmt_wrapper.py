@@ -4026,7 +4026,7 @@ class StrategyRunner(object):
             pass  # 用户手动停止，静默退出，不打印 traceback
 
     def _handlebar_impl(self, C):
-        global _g_last_date, _g_today_done, _g_data_loaded, _g_my_codes, _g_cumulative_pnl, _g_wait_printed
+        global _g_last_date, _g_today_done, _g_data_loaded, _g_my_codes, _g_cumulative_pnl, _g_wait_printed, _g_hold_pool_refreshed
         global _g_pending_buys, _g_retry_queue, _g_candidate_queue, _g_per_stock_amount
         global _g_pending_sells, _g_pending_limitdown_sells, _g_sell_engine
         global _g_op_executed, _g_startup_done, _g_all_data, _g_index_data, _g_last_sell_fingerprint
@@ -4177,6 +4177,17 @@ class StrategyRunner(object):
             afternoon = ALLDAY_AFTERNOON_START <= now <= ALLDAY_AFTERNOON_END
             if not morning and not afternoon:
                 return  # 非交易时间，跳过
+
+        # 生产版：14:45-14:49 预加载数据+预热选股缓存（买入窗口14:50直接读缓存）
+        if not DEBUG_MODE and not TEST_MODE and '1445' <= now < BUY_WINDOW_START:
+            if not _g_data_loaded:
+                print("\n[%s] %s  预加载交易日数据（14:45预热）..." % (STRATEGY_NAME, today))
+                _load_data(C, dt)
+                _g_data_loaded = True
+            if ENABLE_HOLD_POOL_MAINLINE:
+                _run_hold_pool_selection(C)  # 预热缓存，14:50直接命中
+                _g_hold_pool_refreshed = True  # 标记已刷新，14:50跳过二次扫描
+            return
 
         # 生产版：等待盘中买入窗口
         if not DEBUG_MODE and not TEST_MODE and now < BUY_WINDOW_START:
