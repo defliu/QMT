@@ -13,6 +13,13 @@ import os
 from datetime import datetime, timedelta
 
 # ============================================================
+# 缓存变量
+# ============================================================
+_g_md_cache = None
+_g_latest_cache = None
+_g_preload_date = None
+
+# ============================================================
 # 配置常量
 # ============================================================
 CAPITAL = 100000
@@ -171,7 +178,14 @@ def handlebar(C):
     hour = now.hour
     minute = now.minute
 
-    # 仅在14:30-14:55执行（尾盘交易窗口）
+    # === 14:00-14:24: preload ===
+    if hour == 14 and minute < 25:
+        if _g_preload_date != today_str:
+            print("[MF] %s preload data (14:00)..." % today_str)
+            _preload_cache(C)
+        return
+
+    # === 14:25-14:55: execute ===
     if hour < 14 or (hour == 14 and minute < 30) or hour >= 15:
         return
 
@@ -211,31 +225,34 @@ def handlebar(C):
             _write_positions(positions)
         return
 
-    # ====== 3. 调仓：获取数据 ======
-    print("[MF] 调仓日 %s 开始" % today_str)
+    # ====== 3. get data (use cache) ======
+    print("[MF] rebalance day %s start" % today_str)
 
-    # 获取全市场股票列表
-    try:
-        all_codes = C.get_stock_list_in_sector("沪深A股", False)
-    except Exception:
-        all_codes = C.get_stock_list_in_sector("上证A股", False) + C.get_stock_list_in_sector("深证A股", False)
-    all_codes = [c for c in all_codes if c and not c.startswith("3")]  # 排除创业板
+    if _g_md_cache is not None and _g_preload_date == today_str:
+        md = _g_md_cache
+        all_codes = list(md.keys())
+        print("[MF] use cache: %d stocks" % len(md))
+    else:
+        try:
+            all_codes = C.get_stock_list_in_sector("沪深A股", False)
+        except Exception:
+            all_codes = C.get_stock_list_in_sector("上证A股", False) + C.get_stock_list_in_sector("深证A股", False)
+        all_codes = [c for c in all_codes if c and not c.startswith("3")]
 
-    # 批量获取数据（先拿1日数据做过滤）
-    try:
-        md = C.get_market_data_ex(
-            stock_code=all_codes,
-            period="1d",
-            count=120,
-            dividend_type="front"
-        )
-    except Exception as e:
-        print("[MF] 获取数据失败: %s" % e)
-        return
+        try:
+            md = C.get_market_data_ex(
+                stock_code=all_codes,
+                period="1d",
+                count=120,
+                dividend_type="front"
+            )
+        except Exception as e:
+            print("[MF] get data fail: %s" % e)
+            return
 
-    if not md:
-        print("[MF] 无数据")
-        return
+        if not md:
+            print("[MF] empty data")
+            return
 
     # 转换为DataFrame
     df_list = []
@@ -399,3 +416,30 @@ def handlebar(C):
     # 保存持仓
     _write_positions(positions)
     print("[MF] 调仓完成, 持仓%d只" % len(positions))
+
+
+def _preload_cache(C):
+    """preload market data"""
+    global _g_md_cache, _g_latest_cache, _g_preload_date
+    today_str = _get_market_time(C).strftime("%Y-%m-%d")
+    if _g_preload_date == today_str and _g_md_cache is not None:
+        return
+    try:
+        all_codes = C.get_stock_list_in_sector("沪深A股", False)
+        all_codes = [c for c in all_codes if c and not c.startswith("3")]
+        md = C.get_market_data_ex(stock_code=all_codes, period="1d", count=120, dividend_type="front")
+        if md:
+            _g_md_cache = md
+            print("[MF] preload done: %d stocks" % len(md))
+        try:
+            latest = C.get_market_data_ex(
+                ["pe_ttm", "pb", "close", "circ_mv", "amount", "pct_chg"],
+                all_codes, period="1d", count=1
+            )
+            if latest:
+                _g_latest_cache = latest
+        except Exception:
+            pass
+        _g_preload_date = today_str
+    except Exception as e:
+        print("[MF] preload fail: %s" % e)
