@@ -327,7 +327,7 @@ def main():
         output_name = 'strategy%s.py' % suffix
         version_label = '开发版' if args.dev else '生产版'
         mock_label = '含MOCK' if args.dev else '不含MOCK'
-    OUTPUT_PATH = os.path.join(BASE_DIR, output_name)
+    OUTPUT_PATH = os.path.join(BASE_DIR, 'deploy', output_name)
 
     print('Building %s ...' % output_name)
     content = build_strategy_main(SOURCE_FILES)

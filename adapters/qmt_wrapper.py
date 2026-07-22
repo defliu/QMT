@@ -982,34 +982,6 @@ def _parse_pool_line(line):
     return _tq_to_std(text)
 
 
-def _load_pool():
-    if not os.path.exists(POOL_PATH):
-        print("  [外部池] 文件不存在: %s" % POOL_PATH)
-        return []
-    result = []
-    seen_codes = set()
-    try:
-        with open(POOL_PATH, 'r', encoding='gbk') as f:
-            for line in f:
-                std_code = _parse_pool_line(line)
-                if std_code and std_code not in seen_codes:
-                    seen_codes.add(std_code)
-                    result.append({
-                        'code': std_code,
-                        'buy_type': 'pool',
-                        'signal': '外部池',
-                    })
-        print("  [外部池] 读取 %d 只股票（来自 %s）" % (len(result), POOL_PATH))
-        for r in result[:10]:
-            print("    %s" % r['code'])
-        if len(result) > 10:
-            print("    ... 还有 %d 只" % (len(result) - 10))
-    except Exception as e:
-        print("  [外部池] 读取失败: %s" % e)
-        return []
-    return result
-
-
 def _is_st_stock(code, C):
     try:
         name = C.get_stock_name(code)
@@ -1031,20 +1003,8 @@ def _load_data(C, dt=None):
     if ENABLE_HOLD_POOL_MAINLINE:
         all_codes = C.get_stock_list_in_sector('沪深A股')
         target_codes = [c for c in all_codes if c.endswith('.SH') or c.endswith('.SZ')]
-        print("  [数据加载] QMT全市场模式: %d 只(不读selected.txt)" % len(target_codes))
-    else:
-        if os.path.exists(POOL_PATH):
-            try:
-                with open(POOL_PATH, 'r', encoding='gbk') as f:
-                    for line in f:
-                        std_code = _parse_pool_line(line)
-                        if std_code:
-                            target_codes.append(std_code)
-                print("  [数据加载] v2基线模式: %d 只(读selected.txt)" % len(target_codes))
-            except Exception as e:
-                print("  读取外部池失败: %s" % e)
-        else:
-            print("  WARNING: 外部池文件不存在: %s" % POOL_PATH)
+        print("  [数据加载] QMT全市场: %d 只" % len(target_codes))
+
 
     _g_stock_list = target_codes
 
@@ -3309,13 +3269,11 @@ def _execute_trade(C, today, dt):
             return True
         print("  仓位已满，尝试换仓...")
 
-    candidates = _load_pool()
-    if not candidates and ENABLE_HOLD_POOL_MAINLINE:
-        candidates = _run_hold_pool_selection(C)
-        if candidates:
-            print("  [S010] 全市场505筛选池: %d 只（替换外部池）" % len(candidates))
+    candidates = _run_hold_pool_selection(C) if ENABLE_HOLD_POOL_MAINLINE else []
+    if candidates:
+        print("  [S010] 全市场505筛选池: %d 只（替换外部池）" % len(candidates))
     if not candidates:
-        print("  [外部池] 无候选股票")
+        print("  [505筛选] 无候选股票")
         return False
 
     signal_candidates = []
@@ -3657,9 +3615,9 @@ def _execute_full_cycle(C, today, dt):
             _try_retry_queue(C)
 
     # 1. 加载池、评分池候选
-    candidates = _load_pool()
+    candidates = _run_hold_pool_selection(C) if ENABLE_HOLD_POOL_MAINLINE else []
     if not candidates:
-        print("  [全天] 外部池无候选")
+        print("  [全天] 505筛选无候选")
         return
 
     # 2. 过滤池候选（信号+ST+数据检查）
@@ -4086,9 +4044,7 @@ class StrategyRunner(object):
                 _load_data(C, dt)
                 _g_data_loaded = True
 
-            candidates = _load_pool()
-            if not candidates and ENABLE_HOLD_POOL_MAINLINE:
-                candidates = _run_hold_pool_selection(C)
+            candidates = _run_hold_pool_selection(C) if ENABLE_HOLD_POOL_MAINLINE else []
             if ENABLE_HOLD_POOL_MAINLINE and _g_all_data:
                 # S010配套: 先检查持仓505条件失效退出(腾仓位)
                 _s010_exit_codes = _check_hold_pool_exit(C)

@@ -27,23 +27,25 @@ D:\QMT_STRATEGIES\
 │   ├── backtest_dimension6plus2.py
 │   └── ...                      # 诊断/回测/格式化脚本
 ├── tests/                       # 测试文件 + conftest.py（pytest fixtures）
+├── deploy/                      # 部署产物（build 输出目录）
+│   ├── strategy_main.py         # 生产版主策略 → QMT 部署为 STRATEGY_MAIN.py
+│   ├── strategy_dev.py          # 开发版含MOCK
+│   ├── qmt_daily_export.py      # 数据导出脚本 → QMT 部署为 数据导出.py
+│   └── global_config.yaml       # 配置文件
 ├── specs/                       # Hermes 输出的 SPEC 共享目录
 ├── research/                    # 策略研究文档（00_A股交易制度 ~ 06_诚哥策略偏好）
 ├── knowledge_base/              # Obsidian 量化知识库（junction → F: 云盘）
 ├── release/                     # 发布版
 ├── worklog/                     # 每日工作日志
-├── strategy_main.py             # 生产版（构建产物，当前 v2026.07.03-observability）
-├── strategy_dev.py              # 开发版含MOCK（构建产物）
-└── strategy_allday.py           # 全天调试版（构建产物）
 ```
 
 ## 构建流水线
 
 | 命令 | 产物 | 说明 |
 |------|------|------|
-| `python scripts/build_strategy.py` | `strategy_main.py` | 生产版（尾盘模式） |
-| `python scripts/build_strategy.py --dev` | `strategy_dev.py` | 开发版（含MOCK） |
-| `python scripts/build_strategy.py --allday` | `strategy_allday.py` | 全天版（DEBUG_MODE硬编码True） |
+| `python scripts/build_strategy.py` | `deploy/strategy_main.py` | 生产版（尾盘模式） |
+| `python scripts/build_strategy.py --dev` | `deploy/strategy_dev.py` | 开发版（含MOCK） |
+| `python scripts/build_strategy.py --allday` | `deploy/strategy_allday.py` | 全天版（DEBUG_MODE硬编码True） |
 
 ### 构建流程
 
@@ -65,7 +67,7 @@ adapters/context_mock.py       # 仅 --dev 模式
 ### 验证命令
 
 ```cmd
-python scripts/validate_qmt_file.py strategy_main.py
+python scripts/validate_qmt_file.py deploy/strategy_main.py
 ```
 
 **6 项检查必须 ALL PASS：** 文件存在 / 编码 GBK / 文件头 `# coding=gbk` / Python 3.6 语法 / 无 MOCK 残留 / 无长小数输出。
