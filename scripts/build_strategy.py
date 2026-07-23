@@ -295,8 +295,69 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dev', action='store_true', help='构建开发版(含MOCK)')
     parser.add_argument('--allday', action='store_true', help='构建全天调试版(DEBUG_MODE硬编码True,不含MOCK)')
+    parser.add_argument('--atr', action='store_true', help='构建ATR低波动策略(独立于6+2,零遗留代码)')
+    parser.add_argument('--atr-allday', action='store_true', help='构建ATR低波动策略全天调试版(DEBUG_MODE硬编码True)')
     parser.add_argument('--test', action='store_true', help='构建后自动跑miniQMT测试(需本地QMT环境)')
     args = parser.parse_args()
+
+    # ATR低波动策略（独立构建，零6+2遗留代码）
+    if args.atr or args.atr_allday:
+        SOURCE_FILES = ['atr_lowvol/strategy_atr.py']
+        if args.atr_allday:
+            output_name = 'strategy_atr_lowvol_allday.py'
+            version_label = 'ATR低波动策略全天调试版'
+        else:
+            output_name = 'strategy_atr_lowvol.py'
+            version_label = 'ATR低波动策略'
+        mock_label = '不含MOCK'
+        OUTPUT_PATH = os.path.join(BASE_DIR, 'deploy', output_name)
+        print('Building %s ...' % output_name)
+        content = build_strategy_main(SOURCE_FILES)
+
+        # --atr-allday: 硬编码 DEBUG_MODE = True
+        if args.atr_allday:
+            old_line = '_DEBUG_MODE = False'
+            new_line = '_DEBUG_MODE = True'
+            if old_line in content:
+                content = content.replace(old_line, new_line)
+                print('  [atr-allday] 硬编码 DEBUG_MODE = True')
+            else:
+                raise RuntimeError(
+                    "未找到 '%s' 行，无法硬编码 DEBUG_MODE。" % old_line
+                )
+
+        gbk_bytes = _force_gbk(content, OUTPUT_PATH)
+        with open(OUTPUT_PATH, 'wb') as f:
+            f.write(gbk_bytes)
+        print('OK: %s (%s, %s)' % (output_name, version_label, mock_label))
+        print('Size: %d bytes' % os.path.getsize(OUTPUT_PATH))
+        # 验证文件头
+        with open(OUTPUT_PATH, 'r', encoding='gbk') as f:
+            first_line = f.readline().strip()
+        print('First line: %s' % first_line)
+        assert first_line == '# coding=gbk', '文件头不是 # coding=gbk'
+        # 验证编码
+        try:
+            with open(OUTPUT_PATH, 'r', encoding='gbk') as f:
+                content = f.read()
+            print('Encoding: GBK (verified by reading with gbk)')
+        except UnicodeDecodeError:
+            print('ERROR: 文件不是有效的GBK编码')
+            raise
+        # 编译期校验
+        print('Validating... ', end='', flush=True)
+        try:
+            valid = validate_strategy(content, OUTPUT_PATH)
+            print('OK' if valid else 'Warnings')
+        except RuntimeError as e:
+            print('FAILED')
+            print(str(e))
+            if os.path.exists(OUTPUT_PATH):
+                os.remove(OUTPUT_PATH)
+                print('  已删除无效产物: %s' % OUTPUT_PATH)
+            raise
+        print('Done.')
+        return
 
     # 需要合并的源文件（按依赖顺序排列）
     SOURCE_FILES = [
