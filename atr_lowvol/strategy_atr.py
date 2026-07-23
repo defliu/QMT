@@ -810,26 +810,3 @@ class StrategyRunner:
     def exit(self, C):
         _save_holdings()
         print("  [ATR] 策略退出，持仓已保存")
-
-
-# ====== QMT Lifecycle ======
-def init(C):
-    C.runner = StrategyRunner()
-    C.runner.init(C)
-
-def after_init(C):
-    pass
-
-def handlebar(C):
-    runner = getattr(C, 'runner', None)
-    if runner is not None:
-        try:
-            runner.handlebar(C)
-        except KeyboardInterrupt:
-            print("  [策略] 已手动停止，正在退出...")
-            raise
-
-def exit(C):
-    runner = getattr(C, 'runner', None)
-    if runner is not None:
-        runner.exit(C)
