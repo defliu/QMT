@@ -27,11 +27,13 @@ from research.multi_factor_ic.config import OUTPUT_DIR
 
 
 # 权重配置
+# vwap_volume_corr = 10%, 其他等比例缩减
 FACTOR_WEIGHTS = {
-    "BP": 0.30,
-    "reversal_1m": 0.25,
-    "volatility_60d": 0.25,
-    "ROE": 0.20,
+    "BP": 0.27,
+    "reversal_1m": 0.225,
+    "volatility_60d": 0.225,
+    "ROE": 0.18,
+    "vwap_volume_corr": 0.10,
 }
 
 
@@ -115,6 +117,10 @@ class MultiFactorScorer:
         roe = raw["ROE"]
         sub_scores["ROE"] = self._normalize(roe, reverse=False)
 
+        # VWAP量价相关: 值越大（负相关越强）→ 得分越高（IC为正）
+        vwap = raw["vwap_volume_corr"]
+        sub_scores["vwap_volume_corr"] = self._normalize(vwap, reverse=False)
+
         # 3. 加权合成
         # 修复：total 必须初始化为 NaN（不是 0.0），否则被过滤的股票会得到 0 分
         # 而非 NaN，导致它们仍参与 TOP N 排序，市值过滤完全失效
@@ -153,6 +159,11 @@ class MultiFactorScorer:
         roe = raw["ROE"]
         sub_scores["score_ROE"] = self._normalize(roe, reverse=False)
         sub_scores["raw_ROE"] = roe
+
+        # VWAP量价相关
+        vwap = raw["vwap_volume_corr"]
+        sub_scores["score_vwap_volume_corr"] = self._normalize(vwap, reverse=False)
+        sub_scores["raw_vwap_volume_corr"] = vwap
 
         total = pd.Series(np.nan, index=bp.index)
         weight_sum = 0.0
@@ -239,11 +250,12 @@ def top_picks(panel, fin_ffill, date, n=20):
     top = details.head(n)
 
     print(f"\n{date} 评分 TOP {n}")
-    print("-" * 70)
-    print(f"{'排名':<4} {'代码':<12} {'总分':>6} {'BP':>6} {'反转':>6} {'低波':>6} {'ROE':>6}")
-    print("-" * 70)
+    print("-" * 90)
+    print(f"{'排名':<4} {'代码':<12} {'总分':>6} {'BP':>6} {'反转':>6} {'低波':>6} {'ROE':>6} {'VWAP量价':>8}")
+    print("-" * 90)
     for rank, (code, row) in enumerate(top.iterrows(), 1):
         print(f"{rank:<4} {code:<12} {row['score_total']:>6.1f} "
               f"{row['score_BP']:>6.2f} {row['score_reversal']:>6.2f} "
-              f"{row['score_lowvol']:>6.2f} {row['score_ROE']:>6.2f}")
+              f"{row['score_lowvol']:>6.2f} {row['score_ROE']:>6.2f} "
+              f"{row['score_vwap_volume_corr']:>8.2f}")
     return top

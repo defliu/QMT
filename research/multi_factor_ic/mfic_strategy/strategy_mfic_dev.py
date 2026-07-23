@@ -23,9 +23,10 @@ FREQ_MONTHS = 2
 MV_MIN = 0
 MV_MAX = 300000
 AMOUNT_MIN = 20000
-FACTOR_WEIGHTS = {"BP": 0.30, "reversal_1m": 0.25, "volatility_60d": 0.25, "ROE": 0.20}
+FACTOR_WEIGHTS = {"BP": 0.27, "reversal_1m": 0.225, "volatility_60d": 0.225, "ROE": 0.18, "vwap_volume_corr": 0.10}
 POSITIONS_FILE = "D:/QMT_POOL/mfic_positions.json"
 TRADES_FILE = "D:/QMT_POOL/mfic_trades.txt"
+ACCOUNT_ID = '67014907'   # QMT 资金账号
 
 # ============================================================
 # 工具函数
@@ -63,11 +64,16 @@ def _compute_scores(df_daily):
     roe = df_daily["ROE"] if "ROE" in df_daily.columns else df_daily.get("roe", pd.Series(np.nan, index=df_daily.index))
     s_roe = _normalize(roe, reverse=False)
 
+    # VWAP量价相关: IC为正，不反向
+    vwap = df_daily["vwap_volume_corr"] if "vwap_volume_corr" in df_daily.columns else pd.Series(0.0, index=df_daily.index)
+    s_vwap = _normalize(vwap, reverse=False)
+
     # 加权合成
     total = pd.Series(np.nan, index=df_daily.index)
     weight_sum = 0.0
+    score_map = {"BP": s_bp, "reversal_1m": s_rev, "volatility_60d": s_vol, "ROE": s_roe, "vwap_volume_corr": s_vwap}
     for name, w in FACTOR_WEIGHTS.items():
-        s = {"BP": s_bp, "reversal_1m": s_rev, "volatility_60d": s_vol, "ROE": s_roe}.get(name)
+        s = score_map.get(name)
         if s is not None and len(s.dropna()) > 0:
             total = total.add(s * w, fill_value=0)
             weight_sum += w
@@ -112,6 +118,13 @@ def _get_market_time(C):
     except Exception:
         pass
     return datetime.now()
+
+
+def _safe_price(val, default=0):
+    """处理 QMT 返回的标量/数组价格，确保返回标量。"""
+    if isinstance(val, (list, tuple, np.ndarray)):
+        return float(val[0]) if len(val) > 0 else default
+    return float(val or default)
 
 
 def _is_rebalance_day(C, today):
@@ -185,7 +198,7 @@ def handlebar(C):
         try:
             tick = C.get_full_tick([code])
             if tick and code in tick:
-                last_price = tick[code].get("lastPrice", 0)
+                last_price = _safe_price(tick[code].get("lastPrice"))
                 entry_price = pos.get("entry_price", 0)
                 if last_price > 0 and entry_price > 0:
                     ret = last_price / entry_price - 1.0
@@ -198,10 +211,18 @@ def handlebar(C):
 
     for code, shares in to_sell:
         try:
-            C.passorder(24, 1101, C.accountid, code, 5, -1, shares, C, strRemark="mfic")
-            print("[mfic] 止损卖出 %s %d股" % (code, shares))
-            if code in positions:
-                del positions[code]
+            # 止损卖出用限价卖一价（prType=0），避免市价单不处理
+            tick_price = C.get_full_tick([code])
+            ask1 = 0
+            if tick_price and code in tick_price:
+                ask1 = _safe_price(tick_price[code].get("askPrice1"))
+            order_id = passorder(24, 1101, ACCOUNT_ID, code, 0, ask1, shares, C)
+            if order_id:
+                print("[mfic] 止损卖出 %s %d股" % (code, shares))
+                if code in positions:
+                    del positions[code]
+            else:
+                print("[mfic] 止损卖出失败 %s: passorder返回0" % code)
         except Exception as e:
             print("[mfic] 止损卖出失败 %s: %s" % (code, e))
 
@@ -289,7 +310,7 @@ def handlebar(C):
     # 获取完整历史数据计算因子
     try:
         hist = C.get_market_data_ex(
-            ["close", "pct_chg", "pb", "pe_ttm"],
+            ["close", "pct_chg", "pb", "pe_ttm", "volume", "amount"],
             candidates, period="1d", count=120
         )
     except Exception:
@@ -330,9 +351,30 @@ def handlebar(C):
             if not pd.isna(pb_latest) and not pd.isna(pe) and pb_latest > 0 and pe > 0:
                 roe = pe / pb_latest * 0.01  # 粗略估算
 
+            # VWAP量价相关: -5d Spearman corr(VWAP rank, volume rank)
+            # VWAP = amount(元) / (volume(手) * 100) = 元/股
+            vwap_corr = 0.0
+            vol_arr = np.array(h.get("volume", []), dtype=float)
+            amt_arr = np.array(h.get("amount", []), dtype=float)
+            if len(vol_arr) >= 5 and len(amt_arr) >= 5:
+                vol_5 = vol_arr[-5:]
+                amt_5 = amt_arr[-5:]
+                if np.all(vol_5 > 0) and np.all(amt_5 > 0):
+                    vwap_5 = amt_5 / (vol_5 * 100.0)
+                    vw_rank = np.argsort(np.argsort(vwap_5)).astype(float)
+                    vl_rank = np.argsort(np.argsort(vol_5)).astype(float)
+                    vw_m, vl_m = vw_rank.mean(), vl_rank.mean()
+                    num = ((vw_rank - vw_m) * (vl_rank - vl_m)).sum()
+                    d1 = ((vw_rank - vw_m) ** 2).sum()
+                    d2 = ((vl_rank - vl_m) ** 2).sum()
+                    if d1 > 0 and d2 > 0:
+                        corr = num / (np.sqrt(d1) * np.sqrt(d2))
+                        vwap_corr = -corr  # 负相关越强 → 值越高
+
             factor_data[code] = {
                 "BP": bp, "reversal_1m": ret_1m,
-                "volatility_60d": vol_60d, "ROE": roe
+                "volatility_60d": vol_60d, "ROE": roe,
+                "vwap_volume_corr": vwap_corr
             }
         except Exception:
             continue
@@ -359,7 +401,14 @@ def handlebar(C):
     # ====== 4. 执行调仓 ======
     selected_set = set(selected)
     max_per_stock = CAPITAL * MAX_WEIGHT  # 2000元
-    cash = CAPITAL * 0.98  # 预留2%现金
+
+    # 获取账户可用资金
+    try:
+        acct = C.get_account_info()
+        available_cash = float(acct.get("cash", CAPITAL)) if acct else CAPITAL
+    except Exception:
+        available_cash = CAPITAL
+    cash = available_cash * 0.98  # 预留2%现金
 
     # 卖出不在池中的持仓
     for code in list(held_codes):
@@ -368,8 +417,16 @@ def handlebar(C):
             shares = pos.get("shares", 0)
             if shares > 0:
                 try:
-                    C.passorder(24, 1101, C.accountid, code, 5, -1, shares, C, strRemark="mfic")
-                    print("[mfic] 卖出 %s %d股" % (code, shares))
+                    # 调仓卖出用限价卖一价
+                    tick_price = C.get_full_tick([code])
+                    ask1 = 0
+                    if tick_price and code in tick_price:
+                        ask1 = _safe_price(tick_price[code].get("askPrice1"))
+                    order_id = passorder(24, 1101, ACCOUNT_ID, code, 0, ask1, shares, C)
+                    if order_id:
+                        print("[mfic] 卖出 %s %d股" % (code, shares))
+                    else:
+                        print("[mfic] 卖出失败 %s: passorder返回0" % code)
                 except Exception as e:
                     print("[mfic] 卖出失败 %s: %s" % (code, e))
             if code in positions:
@@ -384,15 +441,18 @@ def handlebar(C):
             tick = C.get_full_tick([code])
             if not tick or code not in tick:
                 continue
-            price = tick[code].get("lastPrice", 0)
+            price = _safe_price(tick[code].get("lastPrice"))
             if price <= 0:
                 continue
             volume = int(max_per_stock / price / 100) * 100
             if volume <= 0:
                 continue
-            C.passorder(23, 1101, C.accountid, code, 5, -1, volume, C, strRemark="mfic")
-            print("[mfic] 买入 %s %.2f×%d股=%.0f元" % (code, price, volume, price*volume))
-            positions[code] = {"shares": volume, "entry_price": price, "buy_date": today_str}
+            order_id = passorder(23, 1101, ACCOUNT_ID, code, 11, price, volume, C)
+            if order_id:
+                print("[mfic] 买入 %s %.2f×%d股=%.0f元" % (code, price, volume, price*volume))
+                positions[code] = {"shares": volume, "entry_price": price, "buy_date": today_str}
+            else:
+                print("[mfic] 买入失败 %s: passorder返回0" % code)
         except Exception as e:
             print("[mfic] 买入失败 %s: %s" % (code, e))
 

@@ -33,6 +33,7 @@ FACTOR_CATEGORIES = {
     "turnover_change": "情绪",
     "volatility_60d": "情绪",
     "liquidity_avg": "情绪",
+    "vwap_volume_corr": "量价",
 }
 
 # 极值处理：百分位截尾

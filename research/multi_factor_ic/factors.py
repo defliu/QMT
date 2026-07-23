@@ -27,6 +27,7 @@ FACTOR_CONFIG = {
     "turnover_change": {"category": "情绪", "params": {}},
     "volatility_60d": {"category": "情绪", "params": {"window": 60}},
     "liquidity_avg": {"category": "情绪", "params": {"window": 20}},
+    "vwap_volume_corr": {"category": "量价", "params": {"window": 5}},
 }
 
 
@@ -99,5 +100,40 @@ def compute_all_factors(panel, fin_ffill, date):
         result["liquidity_avg"] = la.reindex(date_series.index)
     else:
         result["liquidity_avg"] = pd.Series(0.0, index=date_series.index)
+
+    # VWAP量价相关: -rank(5d Spearman corr(rank(VWAP), rank(vol)))
+    # 对应 gtja191_090: -1 * rank(corr(rank(vwap), rank(volume), 5))
+    # VWAP = amount(元) / (volume(手) × 100) = 元/股
+    # 使用向量化 unstack + rolling corr 避免慢速 groupby-apply
+    if date_idx >= 5:
+        start = trade_dates[date_idx - 4]
+        amount_wide = panel.loc[start:date, "amount"].unstack("ts_code")
+        vol_wide = panel.loc[start:date, "vol"].unstack("ts_code")
+        # 边界处理: volume=0(停牌)或amount=0(无交易)的股票排除
+        # 5日内任意一天volume/amount为零或NaN → 整只股票不参与计算
+        safe_mask = (vol_wide > 0).all(axis=0) & (amount_wide > 0).all(axis=0)
+        vol_wide = vol_wide.loc[:, safe_mask]
+        amount_wide = amount_wide.loc[:, safe_mask]
+        if vol_wide.shape[1] == 0:
+            # 全部被排除（全市场停牌日，极罕见）
+            result["vwap_volume_corr"] = pd.Series(0.0, index=date_series.index)
+        else:
+            vwap_wide = amount_wide / (vol_wide * 100.0)
+            # 沿时间轴 rank（每个股票独立 rank）
+            vwap_rank = vwap_wide.rank(axis=0)
+            vol_rank = vol_wide.rank(axis=0)
+            # 5日滚动 Spearman corr: rolling corr 等价于 Pearson on ranks
+            corr_wide = vwap_rank.rolling(5, min_periods=5).corr(vol_rank)
+            if len(corr_wide) > 0:
+                latest_corr = corr_wide.iloc[-1]
+                result["vwap_volume_corr"] = (-latest_corr.rank()).reindex(date_series.index)
+            else:
+                result["vwap_volume_corr"] = pd.Series(0.0, index=date_series.index)
+            # 新股/停牌等导致的缺失值填0（中性），不参与评分排序
+            if result["vwap_volume_corr"].isna().any():
+                result["vwap_volume_corr"] = result["vwap_volume_corr"].fillna(0.0)
+    else:
+        # 前4个交易日数据不足5天，所有股票填0（中性）
+        result["vwap_volume_corr"] = pd.Series(0.0, index=date_series.index)
 
     return result
